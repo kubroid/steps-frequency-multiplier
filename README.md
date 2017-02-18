@@ -8,6 +8,7 @@ This is a simple step/dir multiplier based on STM32 dev boards for use with any 
 ### Methods
 * Uses **STM32CubeMX** to initialize all options of MCU
 * Uses latest **HAL** drivers
+* Uses **SW4STM32** IDE to build project
 * Uses **EXTI** to capture input pulses
 
 ### Branches:
