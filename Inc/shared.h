@@ -30,6 +30,9 @@
 // uses for calculating input periods
 #define INPUT_MAX_WAIT_TIME         1000 // us
 
+// enable/disable simple filtering of input periods
+#define INPUT_SIMPLE_PERIOD_FILTER  1 // 0,1,true,false
+
 
 
 
@@ -116,9 +119,20 @@
 
 
 #ifdef _MAIN_C
-  volatile uint16_t inp_last_time[AXES] = {0};
+  volatile uint16_t inp_wait_time[AXES] = {0};
 #else
-  extern volatile uint16_t inp_last_time[AXES];
+  extern volatile uint16_t inp_wait_time[AXES];
+#endif
+
+
+
+
+#if INPUT_SIMPLE_PERIOD_FILTER
+  #ifdef _MAIN_C
+    volatile uint16_t inp_last_period[AXES] = {0};
+  #else
+    extern volatile uint16_t inp_last_period[AXES];
+  #endif
 #endif
 
 

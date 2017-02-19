@@ -49,7 +49,12 @@ void static inline out_buf_add_step ( const uint8_t axis )
   _TEST_axis_step_pos[axis] += _TEST_axis_dir_state[axis] ? -1 : 1;
 
   // calculate duration of the one pulse state
-  t = (PULSE_WAIT_TIME - inp_last_time[axis]) / (MULT*2);
+#if INPUT_SIMPLE_PERIOD_FILTER
+  inp_last_period[axis] = ((PULSE_WAIT_TIME - inp_wait_time[axis]) + inp_last_period[axis]) / 2;
+  t = inp_last_period[axis] / (MULT*2);
+#else
+  t = (PULSE_WAIT_TIME - inp_wait_time[axis]) / (MULT*2);
+#endif
   if ( !t ) t = 1;
 
   // add multiplied values to the output buffer
@@ -64,8 +69,8 @@ void static inline out_buf_add_step ( const uint8_t axis )
   }
   #undef pos
 
-  // save timestamp of this input
-  inp_last_time[axis] = PULSE_WAIT_TIME;
+  // reset wait timer for this axis
+  inp_wait_time[axis] = PULSE_WAIT_TIME;
 }
 
 // add direction changes to the output buffer of current axis
@@ -80,6 +85,10 @@ void static inline out_buf_add_dir
   // TODO - TEST CODE - remove this code
   _TEST_axis_dir_state[axis] = cur;
 
+#if INPUT_SIMPLE_PERIOD_FILTER
+  inp_last_period[axis] = PULSE_WAIT_TIME - inp_wait_time[axis];
+#endif
+
   // add direction change to the output buffer
   out_val[axis][pos] = prev ? 4 : 2;
   out_time[axis][pos] = DIR_DELAY_BEFORE;
@@ -89,8 +98,8 @@ void static inline out_buf_add_dir
   ++pos;
   #undef pos
 
-  // save timestamp of this input
-  inp_last_time[axis] = PULSE_WAIT_TIME;
+  // reset wait timer for this axis
+  inp_wait_time[axis] = PULSE_WAIT_TIME;
 }
 
 // uses to update any time counters
@@ -101,7 +110,7 @@ void static inline time_tick(void)
   // update individual wait timers for each axis
   for ( axis = AXES; axis--; )
   {
-    if ( inp_last_time[axis] ) --inp_last_time[axis];
+    if ( inp_wait_time[axis] ) --inp_wait_time[axis];
   }
 }
 

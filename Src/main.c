@@ -65,7 +65,10 @@ void static inline prepare_vars(void)
   // set individual wait timers for each axis
   for ( uint8_t axis = AXES; axis--; )
   {
-    inp_last_time[axis] = PULSE_WAIT_TIME;
+    inp_wait_time[axis] = PULSE_WAIT_TIME;
+#if INPUT_SIMPLE_PERIOD_FILTER
+    inp_last_period[axis] = PULSE_WAIT_TIME;
+#endif
   }
 }
 
