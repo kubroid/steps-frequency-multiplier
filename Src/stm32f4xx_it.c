@@ -38,10 +38,11 @@
 /* USER CODE BEGIN 0 */
 #include "shared.h"
 
-// add a step to the output buffer of current axis
+  // add a step to the output buffer of current axis
 void static inline out_buf_add_step ( const uint8_t axis )
 {
-  static uint16_t t;
+  static uint16_t t1;
+  static uint16_t t2;
   static uint8_t m;
 
   #define pos out_add_pos[axis]
@@ -51,20 +52,32 @@ void static inline out_buf_add_step ( const uint8_t axis )
   // calculate duration of the one pulse state
 #if INPUT_SIMPLE_PERIOD_FILTER
   inp_last_period[axis] = ((PULSE_WAIT_TIME - inp_wait_time[axis]) + inp_last_period[axis]) / 2;
-  t = inp_last_period[axis] / (MULT*2);
+  t1 = inp_last_period[axis] / (MULT*2); // pulse time
+  t2 = inp_last_period[axis] % (MULT*2); // missed time
 #else
-  t = (PULSE_WAIT_TIME - inp_wait_time[axis]) / (MULT*2);
+  t1 = (PULSE_WAIT_TIME - inp_wait_time[axis]) / (MULT*2); // pulse time
+  t2 = (PULSE_WAIT_TIME - inp_wait_time[axis]) % (MULT*2); // missed time
 #endif
-  if ( !t ) t = 1;
 
   // add multiplied values to the output buffer
   for ( m = MULT; m--; )
   {
     out_val[axis][pos] = 1;
-    out_time[axis][pos] = t;
+    out_time[axis][pos] = t1;
+    if ( t2 ) // add a piece of missed time to the step high time
+    {
+      ++out_time[axis][pos];
+      --t2;
+    }
     ++pos;
+
     out_val[axis][pos] = 0;
-    out_time[axis][pos] = t;
+    out_time[axis][pos] = t1;
+    if ( t2 ) // add a piece of missed time to the step low time
+    {
+      ++out_time[axis][pos];
+      --t2;
+    }
     ++pos;
   }
   #undef pos
