@@ -2,11 +2,13 @@ For example we have a constant input frequency but with different periods
 
 STEP:       *        *                        *      *            *                      *
 PERIOD:     |  50us  |         140us          | 40us |    80us    |        130us         |
+            ------------------------------------------------------------------------------
 
 After an ideal input filtering we must get something like this
 
 STEP:       *              *              *               *              *               *
 PERIOD:     |      88us    |      88us    |      88us     |      88us    |      88us     |
+            +--------------+--------------+---------------+--------------+---------------+
 
 But an ideal filter must make a lot of work to do this.
 It must have a code to determine a constant input frequency.
@@ -22,21 +24,25 @@ EXAMPLE
 
 STEP:      (1)             (2)               (3)     *            *                      *
 PERIOD:     |     95us      |      95us       | 40us |    80us    |        130us         |
+            +---------------+-----------------+
 
 Here we make equal values for the periods 1..2 and 2..3 [ (50+140)/2=95 ]
 Next stage is make equal periods between 2..3 and 3..4 [ (95+40)/2=67 ]
 
 STEP:       *              (2)          (3)         (4)           *                      *
 PERIOD:     |     95us      |    67us    |   67us    |    80us    |        130us         |
+                            +------------+-----------+
 
 etc.. [ (67+80)/2=74 ]
 
 STEP:       *               *           (3)          (4)         (5)                     *
 PERIOD:     |     95us      |    67us    |    74us    |   74us    |        130us         |
+                                         +------------+-----------+
 
 etc.. [ (74+130)/2=102 ]
 
 STEP:       *               *            *           (4)              (5)               (6)
 PERIOD:     |     95us      |    67us    |    74us    |     102us      |      102us      |
+                                                      +----------------+-----------------+
 
 And finally we got more equal input periods and smoother output
