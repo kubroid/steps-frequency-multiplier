@@ -1,6 +1,11 @@
 # STEP / DIRECTION multiplier and filter
 This is a simple step/dir multiplier based on STM32 dev boards for use with any CNC controller.
 
+![2017-02-21_202058](https://cloud.githubusercontent.com/assets/16130975/23169236/29a15cdc-f875-11e6-8569-83c2fc136169.png)
+
+## Downloads
+* https://github.com/MX-Master/STEP_DIR_multiplier/releases
+
 ## Features
 * Up to **5** input/output axes
 * Up to **200 KHz** of output pulse frequency (for the alpha)
