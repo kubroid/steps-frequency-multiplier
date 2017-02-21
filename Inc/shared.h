@@ -28,7 +28,7 @@
 
 // max wait time between 2 input pulses
 // uses for calculating input periods
-#define INPUT_MAX_WAIT_TIME         1000 // us
+#define INPUT_MAX_WAIT_TIME         5000 // us
 
 // enable/disable simple filtering of input periods
 #define INPUT_SIMPLE_PERIOD_FILTER  1 // 0,1,true,false
