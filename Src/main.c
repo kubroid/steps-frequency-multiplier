@@ -164,17 +164,6 @@ void static inline setup_OC_DMA_array()
 
   aOC_DMA_val[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD - 1;
 }
-// set axis STEP output pins same as inputs
-void static inline setup_out_STEP_pins()
-{
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    HAL_GPIO_WritePin(
-      aAxisStepOutputs[axis].PORT, aAxisStepOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(aAxisStepInputs[axis].PORT, aAxisStepInputs[axis].PIN)
-    );
-  }
-}
 // set axis DIR output pins same as inputs
 void static inline setup_out_DIR_pins()
 {
@@ -356,21 +345,10 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
-  // update DMA array
   setup_OC_DMA_array();
-
-  // setup output pins
-#if 0
-  setup_out_STEP_pins();
-#endif
   setup_out_DIR_pins();
-
   start_counter_timer_it();
-
-#if 1
   reset_out_timers_data();
-#endif
-
   start_out_timers_it();
   /* USER CODE END 2 */
 
