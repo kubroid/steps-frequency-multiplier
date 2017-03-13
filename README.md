@@ -1,15 +1,20 @@
 # STEP / DIRECTION multiplier and filter
 This is a simple step/dir multiplier based on STM32 dev boards for use with any CNC controller.
 
+![2017-02-21_202058](https://cloud.githubusercontent.com/assets/16130975/23169236/29a15cdc-f875-11e6-8569-83c2fc136169.png)
+
+## Downloads
+* https://github.com/MX-Master/STEP_DIR_multiplier/releases
+
 ## Features
 * Up to **5** input/output axes
-* Up to **1 MHz** of output pulses (for the alpha)
+* Up to **200 KHz** of output pulse frequency (for the alpha)
 
 ### Methods
 * Uses **STM32CubeMX** to initialize all options of MCU
 * Uses latest **HAL** drivers
 * Uses **SW4STM32** IDE to build project
-* Uses **EXTI** to capture input pulses
+* Uses **EXTI** to capture input pulses (for the alpha)
 
 ### Branches:
 * **MASTER**: for the STM32F407VETx dev boards (_12$_)
