@@ -36,173 +36,23 @@
 #include "stm32f4xx_it.h"
 
 /* USER CODE BEGIN 0 */
-#include "shared.h"
-
-  // add a step to the output buffer of current axis
-void static inline out_buf_add_step ( const uint8_t axis )
-{
-  static uint16_t t1;
-  static uint16_t t2;
-  static uint8_t m;
-
-  #define pos out_add_pos[axis]
-  // TODO - TEST CODE - remove this code
-  _TEST_axis_step_pos[axis] += _TEST_axis_dir_state[axis] ? -1 : 1;
-
-  // calculate duration of the one pulse state
-#if INPUT_SIMPLE_PERIOD_FILTER
-  inp_last_period[axis] = ((PULSE_WAIT_TIME - inp_wait_time[axis]) + inp_last_period[axis]) / 2;
-  t1 = inp_last_period[axis] / (MULT*2); // pulse time
-  t2 = inp_last_period[axis] % (MULT*2); // missed time
-#else
-  t1 = (PULSE_WAIT_TIME - inp_wait_time[axis]) / (MULT*2); // pulse time
-  t2 = (PULSE_WAIT_TIME - inp_wait_time[axis]) % (MULT*2); // missed time
-#endif
-
-  // add multiplied values to the output buffer
-  for ( m = MULT; m--; )
-  {
-    out_val[axis][pos] = 1;
-    out_time[axis][pos] = t1;
-    if ( t2 ) // add a piece of missed time to the step high time
-    {
-      ++out_time[axis][pos];
-      --t2;
-    }
-    ++pos;
-
-    out_val[axis][pos] = 0;
-    out_time[axis][pos] = t1;
-    if ( t2 ) // add a piece of missed time to the step low time
-    {
-      ++out_time[axis][pos];
-      --t2;
-    }
-    ++pos;
-  }
-  #undef pos
-
-  // reset wait timer for this axis
-  inp_wait_time[axis] = PULSE_WAIT_TIME;
-}
-
-// add direction changes to the output buffer of current axis
-void static inline out_buf_add_dir
-(
-    const uint8_t       axis,
-    const GPIO_PinState cur,
-    const GPIO_PinState prev
-)
-{
-  #define pos out_add_pos[axis]
-  // TODO - TEST CODE - remove this code
-  _TEST_axis_dir_state[axis] = cur;
-
-#if INPUT_SIMPLE_PERIOD_FILTER
-  inp_last_period[axis] = PULSE_WAIT_TIME - inp_wait_time[axis];
-#endif
-
-  // add direction change to the output buffer
-  out_val[axis][pos] = prev ? 4 : 2;
-  out_time[axis][pos] = DIR_DELAY_BEFORE;
-  ++pos;
-  out_val[axis][pos] = cur ? 4 : 2;
-  out_time[axis][pos] = DIR_DELAY_AFTER;
-  ++pos;
-  #undef pos
-
-  // reset wait timer for this axis
-  inp_wait_time[axis] = PULSE_WAIT_TIME;
-}
-
-// uses to update any time counters
-void static inline time_tick(void)
-{
-  static uint8_t axis;
-
-  // update individual wait timers for each axis
-  for ( axis = AXES; axis--; )
-  {
-    if ( inp_wait_time[axis] ) --inp_wait_time[axis];
-  }
-}
-
-// uses to output steps/directions
-void static inline output_tick(void)
-{
-  static uint8_t axis;
-
-  #define pos         out_pos[axis]
-  #define STEP_OUT    STEP_OUTPUTS[axis]
-  #define DIR_OUT     DIR_OUTPUTS[axis]
-  #define step_state  step_output_state_cur[axis]
-  #define dir_state   dir_output_state_cur[axis]
-  #define time        out_time[axis][pos]
-  #define val         out_val[axis][pos]
-
-  for ( axis = AXES; axis--; )
-  {
-    // if nothing to output for current axis, go to the next axis
-    if ( !time ) continue;
-
-    // ticks decrement for the current output value
-    --time;
-
-    // output
-    if ( !val ) // step low
-    {
-      if ( step_state )
-      {
-        step_state = GPIO_PIN_RESET;
-        write_pin(STEP_OUT.PORT, STEP_OUT.PIN, GPIO_PIN_RESET);
-        // TODO - TEST CODE - remove this code
-        _TEST_axis_step_out_pos[axis] += _TEST_axis_dir_out_state[axis] ? -1 : 1;
-      }
-    }
-    else if ( val & 1 ) // step high
-    {
-      if ( !step_state )
-      {
-        step_state = GPIO_PIN_SET;
-        write_pin(STEP_OUT.PORT, STEP_OUT.PIN, GPIO_PIN_SET);
-      }
-    }
-    else if ( val & 2 ) // dir low
-    {
-      if ( dir_state )
-      {
-        dir_state = GPIO_PIN_RESET;
-        write_pin(DIR_OUT.PORT, DIR_OUT.PIN, GPIO_PIN_RESET);
-        // TODO - TEST CODE - remove this code
-        _TEST_axis_dir_out_state[axis] = GPIO_PIN_RESET;
-      }
-    }
-    else // dir high
-    {
-      if ( !dir_state )
-      {
-        dir_state = GPIO_PIN_SET;
-        write_pin(DIR_OUT.PORT, DIR_OUT.PIN, GPIO_PIN_SET);
-        // TODO - TEST CODE - remove this code
-        _TEST_axis_dir_out_state[axis] = GPIO_PIN_SET;
-      }
-    }
-
-    // if no more ticks for the current output value, go to the next value
-    if ( !time ) ++pos;
-  }
-
-  #undef time
-  #undef val
-  #undef cur
-  #undef pos
-  #undef STEP_OUT
-  #undef DIR_OUT
-}
+void process_input_step(uint8_t axis);
+void process_input_dirs();
+void update_out_timers_presc();
+void on_axis_tim_update(uint8_t axis);
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern DMA_HandleTypeDef hdma_tim1_ch1;
+extern DMA_HandleTypeDef hdma_tim3_ch1_trig;
+extern DMA_HandleTypeDef hdma_tim5_ch1;
+extern DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
+extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim4;
+extern TIM_HandleTypeDef htim5;
+extern TIM_HandleTypeDef htim8;
 
 /******************************************************************************/
 /*            Cortex-M4 Processor Interruption and Exception Handlers         */ 
@@ -214,7 +64,7 @@ extern TIM_HandleTypeDef htim3;
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-  global_error = 2;
+
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -230,7 +80,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-  global_error = 4;
+
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -246,7 +96,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-  global_error = 8;
+
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -262,7 +112,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-  global_error = 16;
+
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {
@@ -270,6 +120,32 @@ void UsageFault_Handler(void)
   /* USER CODE BEGIN UsageFault_IRQn 1 */
 
   /* USER CODE END UsageFault_IRQn 1 */
+}
+
+/**
+* @brief This function handles System service call via SWI instruction.
+*/
+void SVC_Handler(void)
+{
+  /* USER CODE BEGIN SVCall_IRQn 0 */
+
+  /* USER CODE END SVCall_IRQn 0 */
+  /* USER CODE BEGIN SVCall_IRQn 1 */
+
+  /* USER CODE END SVCall_IRQn 1 */
+}
+
+/**
+* @brief This function handles Pendable request for system service.
+*/
+void PendSV_Handler(void)
+{
+  /* USER CODE BEGIN PendSV_IRQn 0 */
+
+  /* USER CODE END PendSV_IRQn 0 */
+  /* USER CODE BEGIN PendSV_IRQn 1 */
+
+  /* USER CODE END PendSV_IRQn 1 */
 }
 
 /**
@@ -283,7 +159,7 @@ void SysTick_Handler(void)
   HAL_IncTick();
   HAL_SYSTICK_IRQHandler();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-
+  update_out_timers_presc();
   /* USER CODE END SysTick_IRQn 1 */
 }
 
@@ -304,7 +180,7 @@ void EXTI0_IRQHandler(void)
   /* USER CODE END EXTI0_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
   /* USER CODE BEGIN EXTI0_IRQn 1 */
-  out_buf_add_step(0);
+  process_input_step(0);
   /* USER CODE END EXTI0_IRQn 1 */
 }
 
@@ -318,7 +194,7 @@ void EXTI1_IRQHandler(void)
   /* USER CODE END EXTI1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
   /* USER CODE BEGIN EXTI1_IRQn 1 */
-  out_buf_add_step(1);
+  process_input_step(1);
   /* USER CODE END EXTI1_IRQn 1 */
 }
 
@@ -332,7 +208,7 @@ void EXTI2_IRQHandler(void)
   /* USER CODE END EXTI2_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
   /* USER CODE BEGIN EXTI2_IRQn 1 */
-  out_buf_add_step(2);
+  process_input_step(2);
   /* USER CODE END EXTI2_IRQn 1 */
 }
 
@@ -346,7 +222,7 @@ void EXTI3_IRQHandler(void)
   /* USER CODE END EXTI3_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_3);
   /* USER CODE BEGIN EXTI3_IRQn 1 */
-  out_buf_add_step(3);
+  process_input_step(3);
   /* USER CODE END EXTI3_IRQn 1 */
 }
 
@@ -360,8 +236,36 @@ void EXTI4_IRQHandler(void)
   /* USER CODE END EXTI4_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
   /* USER CODE BEGIN EXTI4_IRQn 1 */
-  out_buf_add_step(4);
+  process_input_step(4);
   /* USER CODE END EXTI4_IRQn 1 */
+}
+
+/**
+* @brief This function handles DMA1 stream2 global interrupt.
+*/
+void DMA1_Stream2_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream2_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream2_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_tim5_ch1);
+  /* USER CODE BEGIN DMA1_Stream2_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream2_IRQn 1 */
+}
+
+/**
+* @brief This function handles DMA1 stream4 global interrupt.
+*/
+void DMA1_Stream4_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream4_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream4_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_tim3_ch1_trig);
+  /* USER CODE BEGIN DMA1_Stream4_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream4_IRQn 1 */
 }
 
 /**
@@ -370,7 +274,7 @@ void EXTI4_IRQHandler(void)
 void EXTI9_5_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI9_5_IRQn 0 */
-  static uint8_t axis;
+#if 0
   /* USER CODE END EXTI9_5_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_5);
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_6);
@@ -378,20 +282,39 @@ void EXTI9_5_IRQHandler(void)
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_8);
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_9);
   /* USER CODE BEGIN EXTI9_5_IRQn 1 */
-  #define cur  dir_input_state_cur[axis]
-  #define prev dir_input_state_prev[axis]
-  for ( axis = AXES; axis--; )
-  {
-    // get current state of a pin
-    cur = read_pin(DIR_INPUTS[axis].PORT, DIR_INPUTS[axis].PIN);
-    // if we have any changes
-    if ( cur != prev ) out_buf_add_dir(axis, cur, prev);
-    // save current state of a pin
-    prev = cur;
-  }
-  #undef cur
-  #undef prev
+#endif
+  process_input_dirs();
   /* USER CODE END EXTI9_5_IRQn 1 */
+}
+
+/**
+* @brief This function handles TIM1 update interrupt and TIM10 global interrupt.
+*/
+void TIM1_UP_TIM10_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 0 */
+  on_axis_tim_update(0);
+  UNUSED(htim1);
+#if 0
+  /* USER CODE END TIM1_UP_TIM10_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim1);
+  /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 1 */
+#endif
+  /* USER CODE END TIM1_UP_TIM10_IRQn 1 */
+}
+
+/**
+* @brief This function handles TIM2 global interrupt.
+*/
+void TIM2_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM2_IRQn 0 */
+
+  /* USER CODE END TIM2_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim2);
+  /* USER CODE BEGIN TIM2_IRQn 1 */
+
+  /* USER CODE END TIM2_IRQn 1 */
 }
 
 /**
@@ -400,13 +323,90 @@ void EXTI9_5_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM3_IRQn 0 */
-
+  on_axis_tim_update(1);
+  UNUSED(htim3);
+#if 0
   /* USER CODE END TIM3_IRQn 0 */
   HAL_TIM_IRQHandler(&htim3);
   /* USER CODE BEGIN TIM3_IRQn 1 */
-  time_tick();
-  output_tick();
+#endif
   /* USER CODE END TIM3_IRQn 1 */
+}
+
+/**
+* @brief This function handles TIM4 global interrupt.
+*/
+void TIM4_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM4_IRQn 0 */
+  on_axis_tim_update(2);
+  UNUSED(htim4);
+#if 0
+  /* USER CODE END TIM4_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim4);
+  /* USER CODE BEGIN TIM4_IRQn 1 */
+#endif
+  /* USER CODE END TIM4_IRQn 1 */
+}
+
+/**
+* @brief This function handles TIM8 update interrupt and TIM13 global interrupt.
+*/
+void TIM8_UP_TIM13_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM8_UP_TIM13_IRQn 0 */
+  on_axis_tim_update(4);
+  UNUSED(htim8);
+#if 0
+  /* USER CODE END TIM8_UP_TIM13_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim8);
+  /* USER CODE BEGIN TIM8_UP_TIM13_IRQn 1 */
+#endif
+  /* USER CODE END TIM8_UP_TIM13_IRQn 1 */
+}
+
+/**
+* @brief This function handles TIM5 global interrupt.
+*/
+void TIM5_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM5_IRQn 0 */
+  on_axis_tim_update(3);
+  UNUSED(htim5);
+#if 0
+  /* USER CODE END TIM5_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim5);
+  /* USER CODE BEGIN TIM5_IRQn 1 */
+#endif
+  /* USER CODE END TIM5_IRQn 1 */
+}
+
+/**
+* @brief This function handles DMA2 stream1 global interrupt.
+*/
+void DMA2_Stream1_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_tim1_ch1);
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 1 */
+}
+
+/**
+* @brief This function handles DMA2 stream7 global interrupt.
+*/
+void DMA2_Stream7_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream7_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream7_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_tim8_ch4_trig_com);
+  /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream7_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
