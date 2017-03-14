@@ -85,6 +85,7 @@
 #define AXIS4_DIR_INPUT_GPIO_Port GPIOA
 #define AXIS5_DIR_INPUT_Pin GPIO_PIN_9
 #define AXIS5_DIR_INPUT_GPIO_Port GPIOA
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
