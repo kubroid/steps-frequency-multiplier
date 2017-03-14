@@ -43,16 +43,74 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+DMA_HandleTypeDef hdma_tim1_ch1;
+DMA_HandleTypeDef hdma_tim3_ch1_trig;
+DMA_HandleTypeDef hdma_tim4_ch1;
 
 /* USER CODE BEGIN PV */
-/* Private variables ---------------------------------------------------------*/
+#define AXIS_CNT            3 // 1..3
+#define OUT_STEP_MULT       10 // 1..36
+#define INP_MAX_PERIOD      3000 // us
 
+
+
+
+#define CNT_TIM             &htim2 // timer to calculate periods
+
+static TIM_HandleTypeDef* aAxisTimH[] = {
+    &htim1,
+    &htim3,
+    &htim4
+};
+static uint32_t aAxisTimCh[] = {
+    TIM_CHANNEL_1,
+    TIM_CHANNEL_1,
+    TIM_CHANNEL_1
+};
+
+volatile uint32_t aSteps[AXIS_CNT] = {0};
+volatile uint32_t aAxisTimPresc[AXIS_CNT] = {0};
+volatile uint32_t aAxisTimPrescPrev[AXIS_CNT] = {0};
+volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
+volatile uint32_t aStepInTime[AXIS_CNT] = {0};
+volatile uint32_t aAxisOutEnabled[AXIS_CNT] = {0};
+
+volatile uint8_t aDir[AXIS_CNT] = {0};
+
+uint32_t aOC_DMA_val[OUT_STEP_MULT*2] = {0};
+
+struct PORT_PIN_t
+{
+  GPIO_TypeDef*   PORT;
+  uint16_t        PIN;
+};
+const struct PORT_PIN_t aAxisStepInputs[] = {
+  {AXIS1_STEP_INPUT_GPIO_Port, AXIS1_STEP_INPUT_Pin},
+  {AXIS2_STEP_INPUT_GPIO_Port, AXIS2_STEP_INPUT_Pin},
+  {AXIS3_STEP_INPUT_GPIO_Port, AXIS3_STEP_INPUT_Pin}
+};
+const struct PORT_PIN_t aAxisDirInputs[] = {
+  {AXIS1_DIR_INPUT_GPIO_Port, AXIS1_DIR_INPUT_Pin},
+  {AXIS2_DIR_INPUT_GPIO_Port, AXIS2_DIR_INPUT_Pin},
+  {AXIS3_DIR_INPUT_GPIO_Port, AXIS3_DIR_INPUT_Pin}
+};
+const struct PORT_PIN_t aAxisStepOutputs[] = {
+  {AXIS1_STEP_OUTPUT_GPIO_Port, AXIS1_STEP_OUTPUT_Pin},
+  {AXIS2_STEP_OUTPUT_GPIO_Port, AXIS2_STEP_OUTPUT_Pin},
+  {AXIS3_STEP_OUTPUT_GPIO_Port, AXIS3_STEP_OUTPUT_Pin}
+};
+const struct PORT_PIN_t aAxisDirOutputs[] = {
+  {AXIS1_DIR_OUTPUT_GPIO_Port, AXIS1_DIR_OUTPUT_Pin},
+  {AXIS2_DIR_OUTPUT_GPIO_Port, AXIS2_DIR_OUTPUT_Pin},
+  {AXIS3_DIR_OUTPUT_GPIO_Port, AXIS3_DIR_OUTPUT_Pin}
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void Error_Handler(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
@@ -67,7 +125,184 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
+// setup DMA array values
+void static inline setup_OC_DMA_array()
+{
+  uint16_t uhWidth = OUT_TIM_BASE_PERIOD / (OUT_STEP_MULT*2);
+  uint16_t uhWidthDivLost = OUT_TIM_BASE_PERIOD % (OUT_STEP_MULT*2);
 
+  for ( uint16_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
+  {
+    if ( uhWidthDivLost )
+    {
+      c += uhWidth + 1;
+      --uhWidthDivLost;
+    }
+    else
+    {
+      c += uhWidth;
+    }
+
+    aOC_DMA_val[i] = c;
+  }
+
+  aOC_DMA_val[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD - 1;
+}
+// set axis DIR output pins same as inputs
+void static inline setup_out_DIR_pins()
+{
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    HAL_GPIO_WritePin(
+      aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN,
+      HAL_GPIO_ReadPin(aAxisDirInputs[axis].PORT, aAxisDirInputs[axis].PIN)
+    );
+  }
+}
+// enable counter timer interrupts
+void static inline start_counter_timer_it()
+{
+  HAL_TIM_Base_Start_IT(CNT_TIM);
+}
+// start all out timers
+void static inline start_out_timers_it()
+{
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    HAL_TIM_Base_Start_IT(aAxisTimH[axis]);
+  }
+}
+// cleanup data for all out timers
+void static inline reset_out_timers_data()
+{
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    aAxisTimPresc[axis] = INP_MAX_PERIOD - 1;
+    aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
+
+    __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
+    __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
+    __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], 0xFFFF);
+  }
+}
+
+
+
+
+// update prescallers for the active output timers
+// every 1000us (on systick event)
+void update_out_timers_presc()
+{
+  static uint8_t axis = 0;
+  static uint32_t presc = 0;
+
+  for ( axis = AXIS_CNT; axis--; )
+  {
+    if ( aSteps[axis] )
+    {
+      presc = ( !aStepInPeriod[axis] || aStepInPeriod[axis] > INP_MAX_PERIOD ) ?
+        INP_MAX_PERIOD :
+        aStepInPeriod[axis];
+
+      aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
+      aAxisTimPresc[axis] = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
+#if 1
+      __HAL_TIM_SET_PRESCALER(
+        aAxisTimH[axis],
+        (aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2
+      );
+#endif
+    }
+  }
+}
+
+
+
+
+// start output for selected axis
+void static inline start_output(uint8_t axis)
+{
+  aAxisOutEnabled[axis] = 1;
+  __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
+  __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], aOC_DMA_val[0]);
+#if 0
+  __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
+#endif
+  HAL_TIM_OC_Start_DMA(aAxisTimH[axis], aAxisTimCh[axis], &aOC_DMA_val[1], (OUT_STEP_MULT*2 - 1));
+}
+// stop output for selected axis
+void static inline stop_output(uint8_t axis)
+{
+  __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], 0xFFFF);
+  HAL_TIM_OC_Stop_DMA(aAxisTimH[axis], aAxisTimCh[axis]);
+  aAxisOutEnabled[axis] = 0;
+}
+// get output enabled flag
+uint8_t static inline output(uint8_t axis)
+{
+  return aAxisOutEnabled[axis];
+}
+
+
+
+
+// on EXTI 4-0 input
+void process_input_step(uint8_t axis)
+{
+  ++aSteps[axis];
+  if ( !output(axis) ) start_output(axis);
+
+  aStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - aStepInTime[axis];
+  aStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
+}
+// on EXTI 5-9 input
+void process_input_dirs()
+{
+  static uint8_t axis = 0;
+
+  for ( axis = AXIS_CNT; axis--; )
+  {
+    if ( __HAL_GPIO_EXTI_GET_IT(aAxisDirInputs[axis].PIN) )
+    {
+      __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
+
+      if ( output(axis) )
+      {
+        aDir[axis] = 1;
+      }
+      else
+      {
+        HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
+      }
+    }
+  }
+}
+// on axis TIM update
+void on_axis_tim_update(uint8_t axis)
+{
+  /* TIM Update event */
+  if ( __HAL_TIM_GET_FLAG(aAxisTimH[axis], TIM_FLAG_UPDATE) )
+  {
+    if ( __HAL_TIM_GET_IT_SOURCE(aAxisTimH[axis], TIM_IT_UPDATE) )
+    {
+      __HAL_TIM_CLEAR_IT(aAxisTimH[axis], TIM_IT_UPDATE);
+
+      if ( output(axis) )
+      {
+        stop_output(axis);
+        --aSteps[axis];
+
+        if ( aDir[axis] )
+        {
+          aDir[axis] = 0;
+          HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
+        }
+
+        if ( aSteps[axis] ) start_output(axis);
+      }
+    }
+  }
+}
 /* USER CODE END 0 */
 
 int main(void)
@@ -87,6 +322,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
@@ -96,7 +332,11 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
-
+  setup_OC_DMA_array();
+  setup_out_DIR_pins();
+  start_counter_timer_it();
+  reset_out_timers_data();
+  start_out_timers_it();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -187,6 +427,15 @@ static void MX_NVIC_Init(void)
   /* TIM4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM4_IRQn);
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 }
 
 /* TIM1 init function */
@@ -382,6 +631,16 @@ static void MX_TIM4_Init(void)
   }
 
   HAL_TIM_MspPostInit(&htim4);
+
+}
+
+/** 
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void) 
+{
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
 }
 

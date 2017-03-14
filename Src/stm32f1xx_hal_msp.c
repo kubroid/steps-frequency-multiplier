@@ -34,6 +34,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
 
+extern DMA_HandleTypeDef hdma_tim1_ch1;
+
+extern DMA_HandleTypeDef hdma_tim3_ch1_trig;
+
+extern DMA_HandleTypeDef hdma_tim4_ch1;
+
 extern void Error_Handler(void);
 /* USER CODE BEGIN 0 */
 
@@ -86,6 +92,24 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM1_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM1_CLK_ENABLE();
+
+    /* Peripheral DMA init*/
+  
+    hdma_tim1_ch1.Instance = DMA1_Channel2;
+    hdma_tim1_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_tim1_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_tim1_ch1.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_tim1_ch1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_tim1_ch1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_tim1_ch1.Init.Mode = DMA_NORMAL;
+    hdma_tim1_ch1.Init.Priority = DMA_PRIORITY_MEDIUM;
+    if (HAL_DMA_Init(&hdma_tim1_ch1) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_CC1],hdma_tim1_ch1);
+
   /* USER CODE BEGIN TIM1_MspInit 1 */
 
   /* USER CODE END TIM1_MspInit 1 */
@@ -108,6 +132,27 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM3_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM3_CLK_ENABLE();
+
+    /* Peripheral DMA init*/
+  
+    hdma_tim3_ch1_trig.Instance = DMA1_Channel6;
+    hdma_tim3_ch1_trig.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_tim3_ch1_trig.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_tim3_ch1_trig.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_tim3_ch1_trig.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_tim3_ch1_trig.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_tim3_ch1_trig.Init.Mode = DMA_NORMAL;
+    hdma_tim3_ch1_trig.Init.Priority = DMA_PRIORITY_MEDIUM;
+    if (HAL_DMA_Init(&hdma_tim3_ch1_trig) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    /* Several peripheral DMA handle pointers point to the same DMA handle.
+     Be aware that there is only one channel to perform all the requested DMAs. */
+    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_CC1],hdma_tim3_ch1_trig);
+    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_TRIGGER],hdma_tim3_ch1_trig);
+
   /* USER CODE BEGIN TIM3_MspInit 1 */
 
   /* USER CODE END TIM3_MspInit 1 */
@@ -119,6 +164,24 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM4_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM4_CLK_ENABLE();
+
+    /* Peripheral DMA init*/
+  
+    hdma_tim4_ch1.Instance = DMA1_Channel1;
+    hdma_tim4_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_tim4_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_tim4_ch1.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_tim4_ch1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_tim4_ch1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_tim4_ch1.Init.Mode = DMA_NORMAL;
+    hdma_tim4_ch1.Init.Priority = DMA_PRIORITY_MEDIUM;
+    if (HAL_DMA_Init(&hdma_tim4_ch1) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_CC1],hdma_tim4_ch1);
+
   /* USER CODE BEGIN TIM4_MspInit 1 */
 
   /* USER CODE END TIM4_MspInit 1 */
@@ -197,6 +260,9 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     /* Peripheral clock disable */
     __HAL_RCC_TIM1_CLK_DISABLE();
 
+    /* Peripheral DMA DeInit*/
+    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_CC1]);
+
     /* Peripheral interrupt DeInit*/
     HAL_NVIC_DisableIRQ(TIM1_UP_IRQn);
 
@@ -227,6 +293,10 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     /* Peripheral clock disable */
     __HAL_RCC_TIM3_CLK_DISABLE();
 
+    /* Peripheral DMA DeInit*/
+    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_CC1]);
+    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_TRIGGER]);
+
     /* Peripheral interrupt DeInit*/
     HAL_NVIC_DisableIRQ(TIM3_IRQn);
 
@@ -241,6 +311,9 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM4_MspDeInit 0 */
     /* Peripheral clock disable */
     __HAL_RCC_TIM4_CLK_DISABLE();
+
+    /* Peripheral DMA DeInit*/
+    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_CC1]);
 
     /* Peripheral interrupt DeInit*/
     HAL_NVIC_DisableIRQ(TIM4_IRQn);
