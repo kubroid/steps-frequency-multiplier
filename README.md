@@ -22,3 +22,4 @@ For use with any CNC/3DPrint controller.
 * **STM32F407VETx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F407VETx
 * **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
 * **STM32F103C8Tx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F103C8Tx
+* **STM32F103C8Tx**: First (non tested) version for the STM32F103C8Tx
