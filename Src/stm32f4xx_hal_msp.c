@@ -36,8 +36,6 @@
 
 extern DMA_HandleTypeDef hdma_tim1_ch1;
 
-extern DMA_HandleTypeDef hdma_tim3_ch1_trig;
-
 extern DMA_HandleTypeDef hdma_tim5_ch1;
 
 extern DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
@@ -130,29 +128,6 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM3_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM3_CLK_ENABLE();
-
-    /* Peripheral DMA init*/
-  
-    hdma_tim3_ch1_trig.Instance = DMA1_Stream4;
-    hdma_tim3_ch1_trig.Init.Channel = DMA_CHANNEL_5;
-    hdma_tim3_ch1_trig.Init.Direction = DMA_MEMORY_TO_PERIPH;
-    hdma_tim3_ch1_trig.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_tim3_ch1_trig.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_tim3_ch1_trig.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-    hdma_tim3_ch1_trig.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
-    hdma_tim3_ch1_trig.Init.Mode = DMA_NORMAL;
-    hdma_tim3_ch1_trig.Init.Priority = DMA_PRIORITY_MEDIUM;
-    hdma_tim3_ch1_trig.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
-    if (HAL_DMA_Init(&hdma_tim3_ch1_trig) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    /* Several peripheral DMA handle pointers point to the same DMA handle.
-     Be aware that there is only one stream to perform all the requested DMAs. */
-    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_CC1],hdma_tim3_ch1_trig);
-    __HAL_LINKDMA(htim_base,hdma[TIM_DMA_ID_TRIGGER],hdma_tim3_ch1_trig);
-
   /* USER CODE BEGIN TIM3_MspInit 1 */
 
   /* USER CODE END TIM3_MspInit 1 */
@@ -267,7 +242,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
   /* USER CODE END TIM3_MspPostInit 0 */
   
     /**TIM3 GPIO Configuration    
-    PA6     ------> TIM3_CH1 
+    PC8     ------> TIM3_CH3 
     */
     GPIO_InitStruct.Pin = AXIS2_STEP_OUTPUT_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -386,10 +361,6 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
   /* USER CODE END TIM3_MspDeInit 0 */
     /* Peripheral clock disable */
     __HAL_RCC_TIM3_CLK_DISABLE();
-
-    /* Peripheral DMA DeInit*/
-    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_CC1]);
-    HAL_DMA_DeInit(htim_base->hdma[TIM_DMA_ID_TRIGGER]);
 
     /* Peripheral interrupt DeInit*/
     HAL_NVIC_DisableIRQ(TIM3_IRQn);

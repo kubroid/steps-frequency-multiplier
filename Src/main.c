@@ -46,7 +46,6 @@ TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
 TIM_HandleTypeDef htim8;
 DMA_HandleTypeDef hdma_tim1_ch1;
-DMA_HandleTypeDef hdma_tim3_ch1_trig;
 DMA_HandleTypeDef hdma_tim5_ch1;
 DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
 
@@ -69,7 +68,7 @@ static TIM_HandleTypeDef* aAxisTimH[] = {
 };
 static uint32_t aAxisTimCh[] = {
     TIM_CHANNEL_1,
-    TIM_CHANNEL_1,
+    TIM_CHANNEL_3,
     TIM_CHANNEL_1,
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
@@ -452,9 +451,6 @@ static void MX_NVIC_Init(void)
   /* DMA1_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
-  /* DMA1_Stream4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
   /* DMA2_Stream1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
@@ -615,11 +611,11 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
 
-  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0xFFFF;
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
   {
     Error_Handler();
   }
