@@ -75,6 +75,7 @@ static uint32_t aAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
 };
+static uint8_t aAxisPrescDiv[] = {1,2,2,2,1};
 
 volatile uint32_t aSteps[AXIS_CNT] = {0};
 volatile uint32_t aAxisTimPresc[AXIS_CNT] = {0};
@@ -195,7 +196,7 @@ void static inline reset_out_timers_data()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    aAxisTimPresc[axis] = INP_MAX_PERIOD - 1;
+    aAxisTimPresc[axis] = (INP_MAX_PERIOD/aAxisPrescDiv[axis]) - 1;
     aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
 
     __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
@@ -224,12 +225,11 @@ void update_out_timers_presc()
 
       aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
       aAxisTimPresc[axis] = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
-#if 1
+
       __HAL_TIM_SET_PRESCALER(
         aAxisTimH[axis],
-        (aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2
+        (aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2 / aAxisPrescDiv[axis]
       );
-#endif
     }
   }
 }
@@ -243,9 +243,6 @@ void static inline start_output(uint8_t axis)
   aAxisOutEnabled[axis] = 1;
   __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
   __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], aOC_DMA_val[0]);
-#if 0
-  __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
-#endif
   HAL_TIM_OC_Start_DMA(aAxisTimH[axis], aAxisTimCh[axis], &aOC_DMA_val[1], (OUT_STEP_MULT*2 - 1));
 }
 // stop output for selected axis
@@ -498,7 +495,7 @@ static void MX_TIM1_Init(void)
   htim1.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV2;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
   {
@@ -619,8 +616,8 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
 
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0;
+  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
+  sConfigOC.Pulse = 0xFFFF;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
@@ -743,7 +740,7 @@ static void MX_TIM8_Init(void)
   htim8.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim8.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
-  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV2;
+  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim8.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
   {
@@ -801,8 +798,8 @@ static void MX_TIM8_Init(void)
 static void MX_DMA_Init(void) 
 {
   /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
 }
 
