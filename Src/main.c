@@ -75,6 +75,13 @@ static uint32_t aAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
 };
+static uint32_t aAxisMaxPeriod[] = {
+    INP_MAX_PERIOD,
+    INP_MAX_PERIOD/2,
+    INP_MAX_PERIOD/2,
+    INP_MAX_PERIOD/2,
+    INP_MAX_PERIOD
+};
 static uint8_t aAxisPrescDiv[] = {1,2,2,2,1};
 
 volatile uint32_t aSteps[AXIS_CNT] = {0};
@@ -196,7 +203,7 @@ void static inline reset_out_timers_data()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    aAxisTimPresc[axis] = (INP_MAX_PERIOD/aAxisPrescDiv[axis]) - 1;
+    aAxisTimPresc[axis] = aAxisMaxPeriod[axis] - 1;
     aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
 
     __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
@@ -219,16 +226,15 @@ void update_out_timers_presc()
   {
     if ( aSteps[axis] )
     {
-      presc = ( !aStepInPeriod[axis] || aStepInPeriod[axis] > INP_MAX_PERIOD ) ?
-        INP_MAX_PERIOD :
-        aStepInPeriod[axis];
+      presc = aStepInPeriod[axis] / aAxisPrescDiv[axis];
+      if (!presc || presc > aAxisMaxPeriod[axis]) presc = aAxisMaxPeriod[axis];
 
       aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
       aAxisTimPresc[axis] = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
 
       __HAL_TIM_SET_PRESCALER(
         aAxisTimH[axis],
-        (aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2 / aAxisPrescDiv[axis]
+        ((aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2)
       );
     }
   }
