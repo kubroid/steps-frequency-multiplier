@@ -39,6 +39,7 @@
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
@@ -48,58 +49,51 @@ TIM_HandleTypeDef htim2;
 
 
 #define CNT_TIM             &htim2 // timer to calculate periods
+#define OUT_TIM             &htim1 // timer for output
 #define OUT_BUF_SIZE        256
 
 
-volatile uint8_t aDirInVal[AXIS_CNT] = {0};
-volatile uint8_t aDirInValPrev[AXIS_CNT] = {0};
+volatile uint8_t auqDirInVal[AXIS_CNT] = {0};
+volatile uint8_t auqDirInValPrev[AXIS_CNT] = {0};
 
-volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
-volatile uint32_t aStepInTime[AXIS_CNT] = {0};
+volatile uint32_t auwStepInPeriod[AXIS_CNT] = {0};
+volatile uint32_t auwStepInTime[AXIS_CNT] = {0};
 
-volatile uint32_t uwInPortVal = 0;
-volatile uint32_t uwOutPortVal = 0;
-volatile uint32_t uwInPortState = 0;
+volatile uint16_t uhInPortVal = 0;
+volatile uint16_t uhOutPortVal = 0;
 
-volatile uint16_t aOut[OUT_BUF_SIZE] = {0};
-volatile uint16_t aOutTime[OUT_BUF_SIZE] = {0};
-volatile uint8_t aOutPos = 0;
-volatile uint8_t aOutAddPos = 0;
-
-static uint16_t uhStepBitsExcludeMask = ((uint16_t)-1)
-  & ~(AXIS1_STEP_INPUT_Pin)
-  & ~(AXIS2_STEP_INPUT_Pin)
-  & ~(AXIS3_STEP_INPUT_Pin)
-  & ~(AXIS4_STEP_INPUT_Pin)
-  & ~(AXIS5_STEP_INPUT_Pin);
+volatile uint16_t auhOut[OUT_BUF_SIZE] = {0};
+volatile uint16_t auhOutTime[OUT_BUF_SIZE] = {0};
+volatile uint8_t uqOutPos = 0;
+volatile uint8_t uqOutAddPos = 0;
 
 struct PORT_PIN_t
 {
   GPIO_TypeDef*   PORT;
   uint16_t        PIN;
 };
-const struct PORT_PIN_t aAxisStepInputs[] = {
+const struct PORT_PIN_t asAxisStepInputs[] = {
   {AXIS1_STEP_INPUT_GPIO_Port, AXIS1_STEP_INPUT_Pin},
   {AXIS2_STEP_INPUT_GPIO_Port, AXIS2_STEP_INPUT_Pin},
   {AXIS3_STEP_INPUT_GPIO_Port, AXIS3_STEP_INPUT_Pin},
   {AXIS4_STEP_INPUT_GPIO_Port, AXIS4_STEP_INPUT_Pin},
   {AXIS5_STEP_INPUT_GPIO_Port, AXIS5_STEP_INPUT_Pin}
 };
-const struct PORT_PIN_t aAxisDirInputs[] = {
+const struct PORT_PIN_t asAxisDirInputs[] = {
   {AXIS1_DIR_INPUT_GPIO_Port, AXIS1_DIR_INPUT_Pin},
   {AXIS2_DIR_INPUT_GPIO_Port, AXIS2_DIR_INPUT_Pin},
   {AXIS3_DIR_INPUT_GPIO_Port, AXIS3_DIR_INPUT_Pin},
   {AXIS4_DIR_INPUT_GPIO_Port, AXIS4_DIR_INPUT_Pin},
   {AXIS5_DIR_INPUT_GPIO_Port, AXIS5_DIR_INPUT_Pin}
 };
-const struct PORT_PIN_t aAxisStepOutputs[] = {
+const struct PORT_PIN_t asAxisStepOutputs[] = {
   {AXIS1_STEP_OUTPUT_GPIO_Port, AXIS1_STEP_OUTPUT_Pin},
   {AXIS2_STEP_OUTPUT_GPIO_Port, AXIS2_STEP_OUTPUT_Pin},
   {AXIS3_STEP_OUTPUT_GPIO_Port, AXIS3_STEP_OUTPUT_Pin},
   {AXIS4_STEP_OUTPUT_GPIO_Port, AXIS4_STEP_OUTPUT_Pin},
   {AXIS5_STEP_OUTPUT_GPIO_Port, AXIS5_STEP_OUTPUT_Pin}
 };
-const struct PORT_PIN_t aAxisDirOutputs[] = {
+const struct PORT_PIN_t asAxisDirOutputs[] = {
   {AXIS1_DIR_OUTPUT_GPIO_Port, AXIS1_DIR_OUTPUT_Pin},
   {AXIS2_DIR_OUTPUT_GPIO_Port, AXIS2_DIR_OUTPUT_Pin},
   {AXIS3_DIR_OUTPUT_GPIO_Port, AXIS3_DIR_OUTPUT_Pin},
@@ -113,6 +107,7 @@ void SystemClock_Config(void);
 void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM1_Init(void);
 static void MX_NVIC_Init(void);
 
 /* USER CODE BEGIN PFP */
@@ -130,81 +125,40 @@ void static inline start_counter_timer_it()
 
 
 
-// on EXTI 4-0 input
+// on EXTI 0-4 input
 void process_input_step(uint8_t axis)
 {
-  static uint8_t a = 0;
   static uint8_t m = 0;
   static uint16_t t = 0;
-
-  // TODO - proper step processing
+  static uint16_t notVal = 0;
 
   // get input port value
-  uwInPortVal = (aAxisStepInputs[axis].PORT)->IDR;
+  uhInPortVal = (uint16_t) (asAxisStepInputs[0].PORT)->IDR;
 
   // get period
-  aStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - aStepInTime[axis];
-  aStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
-  if ( aStepInPeriod[axis] > INP_MAX_PERIOD ) aStepInPeriod[axis] = INP_MAX_PERIOD;
+  auwStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - auwStepInTime[axis];
+  auwStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
+  if ( auwStepInPeriod[axis] > INP_MAX_PERIOD ) auwStepInPeriod[axis] = INP_MAX_PERIOD;
 
-  // input port filter to prevent same values for other pins
-  /*
-    example
-      prev val  = 00101
-      cur  val  = 10111
-    we must get
-                  10010 from 10111
-    because we store only difference
-  */
-  for ( a = AXIS_CNT; a--; )
+  // some precalculations
+  notVal = uhInPortVal ^ asAxisStepInputs[axis].PIN;
+  t = auwStepInPeriod[axis] / (OUT_STEP_MULT + 1);
+
+  // add multiplied input value into the buffer
+  for ( m = (OUT_STEP_MULT - 1); m--; t += t )
   {
-    if ( a == axis )
-    {
-      if ( READ_BIT(uwInPortVal, aAxisStepInputs[a].PIN) )
-      {
-        SET_BIT(uwInPortState, aAxisStepInputs[a].PIN);
-      }
-      else
-      {
-        CLEAR_BIT(uwInPortState, aAxisStepInputs[a].PIN);
-      }
-    }
-    else
-    {
-      if
-      (
-        READ_BIT(uwInPortState, aAxisStepInputs[a].PIN) ==
-        READ_BIT(uwInPortVal, aAxisStepInputs[a].PIN)
-      )
-      {
-        if ( READ_BIT(uwInPortState, aAxisStepInputs[a].PIN) )
-        {
-          CLEAR_BIT(uwInPortVal, aAxisStepInputs[a].PIN);
-        }
-        else
-        {
-          SET_BIT(uwInPortVal, aAxisStepInputs[a].PIN);
-        }
-      }
-    }
+    auhOut[uqOutAddPos] = uhInPortVal;
+    auhOutTime[uqOutAddPos] = (uint16_t) t;
+    ++uqOutAddPos;
+    t += t;
+
+    auhOut[uqOutAddPos] = notVal;
+    auhOutTime[uqOutAddPos] = (uint16_t) t;
+    ++uqOutAddPos;
   }
-
-  // to the out buf
-  aOut[aOutAddPos] = (uint16_t) uwInPortVal;
-  aOutTime[aOutAddPos] = (uint16_t) aStepInPeriod[axis];
-  ++aOutAddPos;
-
-  t = aStepInPeriod[axis] / (OUT_STEP_MULT + 1);
-  for ( m = 0; m < (OUT_STEP_MULT - 1); ++m )
-  {
-    aOut[aOutAddPos] = ((uint16_t) uwInPortVal) & uhStepBitsExcludeMask;
-    aOutTime[aOutAddPos] = ((uint16_t) aStepInPeriod[axis]) + t*(m+1);
-    ++aOutAddPos;
-
-    aOut[aOutAddPos] = (uint16_t) uwInPortVal;
-    aOutTime[aOutAddPos] = ((uint16_t) aStepInPeriod[axis]) + t*(m+2);
-    ++aOutAddPos;
-  }
+  auhOut[uqOutAddPos] = uhInPortVal;
+  auhOutTime[uqOutAddPos] = (uint16_t) auwStepInPeriod[axis];
+  ++uqOutAddPos;
 }
 // on EXTI 5-9 input
 void process_input_dirs()
@@ -213,11 +167,26 @@ void process_input_dirs()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( __HAL_GPIO_EXTI_GET_IT(aAxisDirInputs[axis].PIN) )
+    if ( __HAL_GPIO_EXTI_GET_IT(asAxisDirInputs[axis].PIN) )
     {
-      __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
+      __HAL_GPIO_EXTI_CLEAR_IT(asAxisDirInputs[axis].PIN);
 
       // TODO - proper DIR processing
+    }
+  }
+}
+// on out TIM OC
+void process_tim_OC()
+{
+  if ( __HAL_TIM_GET_FLAG(OUT_TIM, TIM_FLAG_CC1) )
+  {
+    if ( __HAL_TIM_GET_IT_SOURCE(OUT_TIM, TIM_IT_CC1) )
+    {
+      {
+        __HAL_TIM_CLEAR_IT(OUT_TIM, TIM_IT_CC1);
+
+        // TODO - output processing
+      }
     }
   }
 }
@@ -241,17 +210,17 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM2_Init();
+  MX_TIM1_Init();
 
   /* Initialize interrupts */
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
+  // start counter
   start_counter_timer_it();
 
   // get input port value
-  uwInPortVal = (aAxisStepInputs[0].PORT)->IDR;
-  uwInPortState = ~uwInPortVal;
-
+  uhInPortVal = (asAxisStepInputs[0].PORT)->IDR;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -345,6 +314,73 @@ static void MX_NVIC_Init(void)
   /* EXTI9_5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+  /* TIM1_CC_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
+}
+
+/* TIM1 init function */
+static void MX_TIM1_Init(void)
+{
+
+  TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
+  TIM_OC_InitTypeDef sConfigOC;
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
+
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = OUT_TIM_PRESCALER;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = OUT_TIM_PERIOD;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0xFFFF;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
 }
 
 /* TIM2 init function */
@@ -355,7 +391,7 @@ static void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig;
 
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = (CNT_TIM_PRESCALLER-1);
+  htim2.Init.Prescaler = CNT_TIM_PRESCALLER;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = CNT_TIM_PERIOD;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;

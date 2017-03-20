@@ -40,9 +40,9 @@
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
-#define OUT_TIM_BASE_PRESCALER 3000
-#define OUT_TIM_BASE_PERIOD 168
-#define CNT_TIM_PRESCALLER 84
+#define OUT_TIM_PRESCALER (168 - 1)
+#define OUT_TIM_PERIOD (0xFFFF - 1)
+#define CNT_TIM_PRESCALLER (84 - 1)
 #define CNT_TIM_PERIOD 0xFFFFFFFF
 
 #define AXIS1_STEP_INPUT_Pin GPIO_PIN_0
