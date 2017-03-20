@@ -43,18 +43,35 @@ TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 #define AXIS_CNT            5 // 1..5
-#define OUT_STEP_MULT       10 // 1..100
+#define OUT_STEP_MULT       2 // 1..100
 #define INP_MAX_PERIOD      3000 // us
 
 
-
-
 #define CNT_TIM             &htim2 // timer to calculate periods
+#define OUT_BUF_SIZE        256
+
+
+volatile uint8_t aDirInVal[AXIS_CNT] = {0};
+volatile uint8_t aDirInValPrev[AXIS_CNT] = {0};
 
 volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
-volatile uint32_t aStepInPeriodPrev[AXIS_CNT] = {0};
 volatile uint32_t aStepInTime[AXIS_CNT] = {0};
-volatile uint32_t aStepInTimePrev[AXIS_CNT] = {0};
+
+volatile uint32_t uwInPortVal = 0;
+volatile uint32_t uwOutPortVal = 0;
+volatile uint32_t uwInPortState = 0;
+
+volatile uint16_t aOut[OUT_BUF_SIZE] = {0};
+volatile uint16_t aOutTime[OUT_BUF_SIZE] = {0};
+volatile uint8_t aOutPos = 0;
+volatile uint8_t aOutAddPos = 0;
+
+static uint16_t uhStepBitsExcludeMask = ((uint16_t)-1)
+  & ~(AXIS1_STEP_INPUT_Pin)
+  & ~(AXIS2_STEP_INPUT_Pin)
+  & ~(AXIS3_STEP_INPUT_Pin)
+  & ~(AXIS4_STEP_INPUT_Pin)
+  & ~(AXIS5_STEP_INPUT_Pin);
 
 struct PORT_PIN_t
 {
@@ -116,10 +133,78 @@ void static inline start_counter_timer_it()
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
+  static uint8_t a = 0;
+  static uint8_t m = 0;
+  static uint16_t t = 0;
+
   // TODO - proper step processing
 
+  // get input port value
+  uwInPortVal = (aAxisStepInputs[axis].PORT)->IDR;
+
+  // get period
   aStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - aStepInTime[axis];
   aStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
+  if ( aStepInPeriod[axis] > INP_MAX_PERIOD ) aStepInPeriod[axis] = INP_MAX_PERIOD;
+
+  // input port filter to prevent same values for other pins
+  /*
+    example
+      prev val  = 00101
+      cur  val  = 10111
+    we must get
+                  10010 from 10111
+    because we store only difference
+  */
+  for ( a = AXIS_CNT; a--; )
+  {
+    if ( a == axis )
+    {
+      if ( READ_BIT(uwInPortVal, aAxisStepInputs[a].PIN) )
+      {
+        SET_BIT(uwInPortState, aAxisStepInputs[a].PIN);
+      }
+      else
+      {
+        CLEAR_BIT(uwInPortState, aAxisStepInputs[a].PIN);
+      }
+    }
+    else
+    {
+      if
+      (
+        READ_BIT(uwInPortState, aAxisStepInputs[a].PIN) ==
+        READ_BIT(uwInPortVal, aAxisStepInputs[a].PIN)
+      )
+      {
+        if ( READ_BIT(uwInPortState, aAxisStepInputs[a].PIN) )
+        {
+          CLEAR_BIT(uwInPortVal, aAxisStepInputs[a].PIN);
+        }
+        else
+        {
+          SET_BIT(uwInPortVal, aAxisStepInputs[a].PIN);
+        }
+      }
+    }
+  }
+
+  // to the out buf
+  aOut[aOutAddPos] = (uint16_t) uwInPortVal;
+  aOutTime[aOutAddPos] = (uint16_t) aStepInPeriod[axis];
+  ++aOutAddPos;
+
+  t = aStepInPeriod[axis] / (OUT_STEP_MULT + 1);
+  for ( m = 0; m < (OUT_STEP_MULT - 1); ++m )
+  {
+    aOut[aOutAddPos] = ((uint16_t) uwInPortVal) & uhStepBitsExcludeMask;
+    aOutTime[aOutAddPos] = ((uint16_t) aStepInPeriod[axis]) + t*(m+1);
+    ++aOutAddPos;
+
+    aOut[aOutAddPos] = (uint16_t) uwInPortVal;
+    aOutTime[aOutAddPos] = ((uint16_t) aStepInPeriod[axis]) + t*(m+2);
+    ++aOutAddPos;
+  }
 }
 // on EXTI 5-9 input
 void process_input_dirs()
@@ -162,6 +247,11 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   start_counter_timer_it();
+
+  // get input port value
+  uwInPortVal = (aAxisStepInputs[0].PORT)->IDR;
+  uwInPortState = ~uwInPortVal;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
