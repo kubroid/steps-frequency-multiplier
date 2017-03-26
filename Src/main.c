@@ -43,29 +43,26 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-#define AXIS_CNT            5 // 1..5
-#define OUT_STEP_MULT       2 // 1..100
+#define AXIS_CNT            4 // 1..4
+#define OUT_STEP_MULT       10 // 1..100
 #define INP_MAX_PERIOD      3000 // us
 
 
 #define CNT_TIM             &htim2 // timer to calculate periods
 #define OUT_TIM             &htim1 // timer for output
-#define OUT_BUF_SIZE        256
+#define BUF_SIZE            (UINT16_MAX+1)
+#define CELL_SIZE           32
 
 
-volatile uint8_t auqDirInVal[AXIS_CNT] = {0};
-volatile uint8_t auqDirInValPrev[AXIS_CNT] = {0};
+volatile uint32_t uwc = 0; // number of CNT_TIM's updates
 
-volatile uint32_t auwStepInPeriod[AXIS_CNT] = {0};
-volatile uint32_t auwStepInTime[AXIS_CNT] = {0};
+volatile uint8_t auqOut[BUF_SIZE] = {0};
+volatile uint32_t auwOutSet[BUF_SIZE/CELL_SIZE] = {0};
+volatile uint16_t uhOutPos = 0;
+volatile uint16_t auhLastOutPos[AXIS_CNT] = {0};
 
-volatile uint16_t uhInPortVal = 0;
-volatile uint16_t uhOutPortVal = 0;
-
-volatile uint16_t auhOut[OUT_BUF_SIZE] = {0};
-volatile uint16_t auhOutTime[OUT_BUF_SIZE] = {0};
-volatile uint8_t uqOutPos = 0;
-volatile uint8_t uqOutAddPos = 0;
+volatile uint64_t aulLastInTime[AXIS_CNT] = {0};
+volatile uint64_t aulLastPeriod[AXIS_CNT] = {0};
 
 struct PORT_PIN_t
 {
@@ -120,50 +117,107 @@ static void MX_NVIC_Init(void);
 void static inline start_counter_timer_it()
 {
   HAL_TIM_Base_Start_IT(CNT_TIM);
+  uwc = 0;
+}
+
+// enable out timer interrupts
+void static inline start_out_timer_it()
+{
+  HAL_TIM_Base_Start_IT(OUT_TIM);
+}
+
+// prepare out port
+void static inline setup_output_port()
+{
+  // set out poer same as input port
+  (asAxisStepOutputs[0].PORT)->ODR = (asAxisStepInputs[0].PORT)->IDR;
+
+  for ( uint32_t o = UINT16_MAX+1; o--; ) auqOut[o] = UINT8_MAX;
 }
 
 
 
 
-// on EXTI 0-4 input
+//
+uint64_t static inline time_us()
+{
+  return (uwc*(0xFFFFFFFF+1) + __HAL_TIM_GET_COUNTER(CNT_TIM));
+}
+
+
+
+
+//
+uint32_t static inline out_cell_state(uint16_t cell)
+{
+  return auwOutSet[cell/CELL_SIZE] & (1 << (cell%CELL_SIZE));
+}
+//
+void static inline out_cell_set(uint16_t cell)
+{
+  auwOutSet[cell/CELL_SIZE] |= (1 << (cell%CELL_SIZE));
+}
+//
+void static inline out_cell_reset(uint16_t cell)
+{
+  auwOutSet[cell/CELL_SIZE] &= ~(1 << (cell%CELL_SIZE));
+}
+
+
+
+
+// on EXTI 0-4 low state
 void process_input_step(uint8_t axis)
 {
-  static uint8_t m = 0;
-  static uint16_t t = 0;
-  static uint16_t notVal = 0;
+  static uint8_t uqM = 0;
+  static uint16_t uhT = 0;
+  static uint16_t uhPos = 0;
+  static uint64_t ulTime = 0;
 
-  // get input port value
-  uhInPortVal = (uint16_t) (asAxisStepInputs[0].PORT)->IDR;
+  // get timestamp
+  ulTime = time_us();
 
   // get period
-  auwStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - auwStepInTime[axis];
-  auwStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
-  if ( auwStepInPeriod[axis] > INP_MAX_PERIOD ) auwStepInPeriod[axis] = INP_MAX_PERIOD;
+  aulLastPeriod[axis] = ulTime - aulLastInTime[axis];
+  aulLastInTime[axis] = ulTime;
 
-  // some precalculations
-  notVal = uhInPortVal ^ asAxisStepInputs[axis].PIN;
-  t = auwStepInPeriod[axis] / (OUT_STEP_MULT + 1);
-
-  // add multiplied input value into the buffer
-  for ( m = (OUT_STEP_MULT - 1); m--; t += t )
+  // get output pos
+  if ( aulLastPeriod[axis] > INP_MAX_PERIOD )
   {
-    auhOut[uqOutAddPos] = uhInPortVal;
-    auhOutTime[uqOutAddPos] = (uint16_t) t;
-    ++uqOutAddPos;
-    t += t;
-
-    auhOut[uqOutAddPos] = notVal;
-    auhOutTime[uqOutAddPos] = (uint16_t) t;
-    ++uqOutAddPos;
+    aulLastPeriod[axis] = INP_MAX_PERIOD;
+    uhPos = uhOutPos;
   }
-  auhOut[uqOutAddPos] = uhInPortVal;
-  auhOutTime[uqOutAddPos] = (uint16_t) auwStepInPeriod[axis];
-  ++uqOutAddPos;
+  else
+  {
+    uhPos = auhLastOutPos[axis];
+  }
+  auhLastOutPos[axis] = uhPos + aulLastPeriod[axis];
+
+  // get pin toggle time
+#if 1
+  uhT = aulLastPeriod[axis] / (OUT_STEP_MULT*2);
+#else
+  uhT = 1;
+#endif
+
+  // add pin toggles to the out buffer
+  for ( uhPos += uhT, uqM = OUT_STEP_MULT; uqM--; uhPos += uhT )
+  {
+    CLEAR_BIT(auqOut[uhPos], 1 << axis);
+    out_cell_set(uhPos);
+    uhPos += uhT;
+
+    SET_BIT(auqOut[uhPos], 1 << axis);
+    out_cell_set(uhPos);
+  }
 }
+
 // on EXTI 5-9 input
 void process_input_dirs()
 {
   static uint8_t axis = 0;
+  static uint16_t uhPos = 0;
+  static uint64_t ulTime = 0;
 
   for ( axis = AXIS_CNT; axis--; )
   {
@@ -171,24 +225,80 @@ void process_input_dirs()
     {
       __HAL_GPIO_EXTI_CLEAR_IT(asAxisDirInputs[axis].PIN);
 
-      // TODO - proper DIR processing
+      // get timestamp
+      ulTime = time_us();
+
+      // get period
+      aulLastPeriod[axis] = ulTime - aulLastInTime[axis];
+      aulLastInTime[axis] = ulTime;
+
+      // get output pos
+      if ( aulLastPeriod[axis] > INP_MAX_PERIOD )
+      {
+        aulLastPeriod[axis] = INP_MAX_PERIOD;
+        uhPos = uhOutPos + 1;
+      }
+      else
+      {
+        uhPos = auhLastOutPos[axis] + 1;
+      }
+      auhLastOutPos[axis] = uhPos;
+
+      // add input value into the buffer
+      if ( HAL_GPIO_ReadPin(asAxisDirInputs[axis].PORT, asAxisDirInputs[axis].PIN) )
+      {
+        SET_BIT(auqOut[uhPos], 1 << (axis+AXIS_CNT));
+      }
+      else
+      {
+        CLEAR_BIT(auqOut[uhPos], 1 << (axis+AXIS_CNT));
+      }
+      out_cell_set(uhPos);
+
+      return;
     }
   }
 }
-// on out TIM OC
-void process_tim_OC()
-{
-  if ( __HAL_TIM_GET_FLAG(OUT_TIM, TIM_FLAG_CC1) )
-  {
-    if ( __HAL_TIM_GET_IT_SOURCE(OUT_TIM, TIM_IT_CC1) )
-    {
-      {
-        __HAL_TIM_CLEAR_IT(OUT_TIM, TIM_IT_CC1);
 
-        // TODO - output processing
+// on out TIM update
+void process_output()
+{
+  static uint32_t out = 0;
+  static uint8_t axis = 0;
+
+  __HAL_TIM_CLEAR_IT(OUT_TIM, TIM_IT_UPDATE);
+
+  if ( out_cell_state(uhOutPos) )
+  {
+    out_cell_reset(uhOutPos);
+
+    for ( out = 0, axis = AXIS_CNT; axis--; )
+    {
+      if ( READ_BIT(auqOut[uhOutPos], 1 << axis) ) {
+        SET_BIT(out, (uint32_t) asAxisStepOutputs[axis].PIN);
+      } else {
+        SET_BIT(out, (uint32_t) (asAxisStepOutputs[axis].PIN << 16U));
+      }
+
+      if ( READ_BIT(auqOut[uhOutPos], 1 << (axis+AXIS_CNT)) ) {
+        SET_BIT(out, (uint32_t) asAxisDirOutputs[axis].PIN);
+      } else {
+        SET_BIT(out, (uint32_t) (asAxisDirOutputs[axis].PIN << 16U));
       }
     }
+
+    // set output port value
+    AXIS1_STEP_OUTPUT_GPIO_Port->BSRR = out;
+    auqOut[uhOutPos] = UINT8_MAX;
   }
+
+  ++uhOutPos;
+}
+
+//
+void counter_timer_update()
+{
+  ++uwc;
 }
 /* USER CODE END 0 */
 
@@ -216,11 +326,9 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
-  // start counter
   start_counter_timer_it();
-
-  // get input port value
-  uhInPortVal = (asAxisStepInputs[0].PORT)->IDR;
+  start_out_timer_it();
+  setup_output_port();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -314,9 +422,12 @@ static void MX_NVIC_Init(void)
   /* EXTI9_5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-  /* TIM1_CC_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
+  /* TIM2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  /* TIM1_UP_TIM10_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
 }
 
 /* TIM1 init function */
@@ -325,8 +436,6 @@ static void MX_TIM1_Init(void)
 
   TIM_ClockConfigTypeDef sClockSourceConfig;
   TIM_MasterConfigTypeDef sMasterConfig;
-  TIM_OC_InitTypeDef sConfigOC;
-  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = OUT_TIM_PRESCALER;
@@ -345,38 +454,9 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
 
-  if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
-  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
-  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 0;
-  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
-  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -406,7 +486,7 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
@@ -437,13 +517,19 @@ static void MX_GPIO_Init(void)
                           |AXIS2_DIR_OUTPUT_Pin|AXIS3_DIR_OUTPUT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : AXIS1_STEP_INPUT_Pin AXIS2_STEP_INPUT_Pin AXIS3_STEP_INPUT_Pin AXIS4_STEP_INPUT_Pin 
-                           AXIS5_STEP_INPUT_Pin AXIS1_DIR_INPUT_Pin AXIS2_DIR_INPUT_Pin AXIS3_DIR_INPUT_Pin 
-                           AXIS4_DIR_INPUT_Pin AXIS5_DIR_INPUT_Pin */
+                           AXIS5_STEP_INPUT_Pin */
   GPIO_InitStruct.Pin = AXIS1_STEP_INPUT_Pin|AXIS2_STEP_INPUT_Pin|AXIS3_STEP_INPUT_Pin|AXIS4_STEP_INPUT_Pin 
-                          |AXIS5_STEP_INPUT_Pin|AXIS1_DIR_INPUT_Pin|AXIS2_DIR_INPUT_Pin|AXIS3_DIR_INPUT_Pin 
-                          |AXIS4_DIR_INPUT_Pin|AXIS5_DIR_INPUT_Pin;
+                          |AXIS5_STEP_INPUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : AXIS1_DIR_INPUT_Pin AXIS2_DIR_INPUT_Pin AXIS3_DIR_INPUT_Pin AXIS4_DIR_INPUT_Pin 
+                           AXIS5_DIR_INPUT_Pin */
+  GPIO_InitStruct.Pin = AXIS1_DIR_INPUT_Pin|AXIS2_DIR_INPUT_Pin|AXIS3_DIR_INPUT_Pin|AXIS4_DIR_INPUT_Pin 
+                          |AXIS5_DIR_INPUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : AXIS4_DIR_OUTPUT_Pin AXIS5_DIR_OUTPUT_Pin AXIS1_STEP_OUTPUT_Pin AXIS2_STEP_OUTPUT_Pin 
@@ -454,7 +540,7 @@ static void MX_GPIO_Init(void)
                           |AXIS2_DIR_OUTPUT_Pin|AXIS3_DIR_OUTPUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
 }

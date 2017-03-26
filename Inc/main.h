@@ -40,8 +40,8 @@
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
-#define OUT_TIM_PRESCALER (168 - 1)
-#define OUT_TIM_PERIOD (0xFFFF - 1)
+#define OUT_TIM_PRESCALER 0
+#define OUT_TIM_PERIOD (168 - 1)
 #define CNT_TIM_PRESCALLER (84 - 1)
 #define CNT_TIM_PERIOD 0xFFFFFFFF
 
