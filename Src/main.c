@@ -55,11 +55,15 @@ DMA_HandleTypeDef hdma_tim1_ch1;
 
 volatile uint32_t uwc = 0; // number of CNT_TIM's updates
 
-volatile uint32_t aSteps[AXIS_CNT] = {0};
-volatile uint32_t aAxisTimPresc[AXIS_CNT] = {0};
-volatile uint32_t aAxisTimPrescPrev[AXIS_CNT] = {0};
-volatile uint64_t aStepInPeriod[AXIS_CNT] = {0};
-volatile uint64_t aStepInTime[AXIS_CNT] = {0};
+volatile uint16_t uhOutTimPresc = 0;
+volatile uint16_t uhOutTimPrescPrev = 0;
+
+volatile uint32_t auwOutDelay[AXIS_CNT] = {0};
+volatile uint32_t auwOutDelayMax[AXIS_CNT] = {0};
+
+volatile uint32_t auwSteps[AXIS_CNT] = {0};
+volatile uint64_t aulPeriod[AXIS_CNT] = {0};
+volatile uint64_t aulTime[AXIS_CNT] = {0};
 
 uint32_t aOC_DMA_val[OUT_STEP_MULT*2] = {0};
 
@@ -183,31 +187,38 @@ uint64_t static inline time_us()
 // every 1000us (on systick event)
 void update_out_timer_presc()
 {
-#if 0
   static uint8_t axis = 0;
-  static uint32_t presc = 0;
-#endif
+  static uint32_t uwMinPeriod = 0;
 
-  // TODO - proper out timer's prescaler handling
-
-  #if 0
-  for ( axis = AXIS_CNT; axis--; )
+  // find minimal input period from all axes
+  for ( uwMinPeriod = 0xFFFFFFFF, axis = AXIS_CNT; axis--; )
   {
-    if ( aSteps[axis] )
+    if ( auwSteps[axis] && aulPeriod[axis] < uwMinPeriod )
     {
-      presc = aStepInPeriod[axis];
-      if (!presc || presc > INP_MAX_PERIOD) presc = INP_MAX_PERIOD;
-
-      aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
-      aAxisTimPresc[axis] = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
-
-      __HAL_TIM_SET_PRESCALER(
-        OUT_TIM,
-        ((aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2)
-      );
+      uwMinPeriod = aulPeriod[axis];
     }
   }
-#endif
+
+  // if we need to change output timer's prescaler
+  if ( uwMinPeriod != 0xFFFFFFFF && uhOutTimPresc != uwMinPeriod )
+  {
+    // save old prescaler
+    uhOutTimPrescPrev = uhOutTimPresc;
+    // set new prescaler
+    uhOutTimPresc = uwMinPeriod;
+    __HAL_TIM_SET_PRESCALER(OUT_TIM, uhOutTimPresc);
+
+    // update output delays for all axes
+    for ( axis = AXIS_CNT; axis--; )
+    {
+      auwOutDelayMax[axis] = aulPeriod[axis] / uwMinPeriod;
+
+      if ( auwOutDelay[axis] )
+      {
+        auwOutDelay[axis] *= uhOutTimPresc / uhOutTimPrescPrev;
+      }
+    }
+  }
 }
 
 
@@ -216,14 +227,21 @@ void update_out_timer_presc()
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
-  static uint64_t ulTime = 0;
+  static uint64_t ulInputTime = 0;
 
-  ++aSteps[axis];
+  // update input steps count
+  auwSteps[axis] += 2;
 
-  ulTime = time_us();
-  aStepInPeriod[axis] = ulTime - aStepInTime[axis];
-  aStepInTime[axis] = ulTime;
+  // update input step period
+  ulInputTime = time_us();
+  aulPeriod[axis] = ulInputTime - aulTime[axis];
+  aulTime[axis] = ulInputTime;
+
+  // set output delays
+  auwOutDelay[axis] = 0;
+  auwOutDelayMax[axis] = aulPeriod[axis] / uhOutTimPresc;
 }
+
 // on EXTI 5-9 input
 void process_input_dirs()
 {
@@ -246,14 +264,35 @@ void process_input_dirs()
 // on output timer OC it
 void process_output()
 {
+  static uint8_t axis = 0;
+
   if ( __HAL_TIM_GET_FLAG(OUT_TIM, TIM_FLAG_CC1) )
   {
     if ( __HAL_TIM_GET_IT_SOURCE(OUT_TIM, TIM_IT_CC1) )
     {
-      {
-        __HAL_TIM_CLEAR_IT(OUT_TIM, TIM_IT_CC1);
+      __HAL_TIM_CLEAR_IT(OUT_TIM, TIM_IT_CC1);
 
-        // TODO - proper output handling
+      for ( axis = AXIS_CNT; axis--; )
+      {
+        // if we have some steps to output for the current axis
+        if ( auwSteps[axis] )
+        {
+          // if it's time to toggle output pin
+          if ( !auwOutDelay[axis] )
+          {
+            // toggle output pin
+            HAL_GPIO_TogglePin(aAxisStepOutputs[axis].PORT, aAxisStepOutputs[axis].PIN);
+            // decrease input steps count
+            --auwSteps[axis];
+            // set new delay
+            auwOutDelay[axis] = auwOutDelayMax[axis];
+          }
+          // just decrease the output delay
+          else
+          {
+            --auwOutDelay[axis];
+          }
+        }
       }
     }
   }
