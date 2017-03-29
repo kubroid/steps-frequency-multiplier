@@ -166,10 +166,11 @@ void static inline start_counter_timer()
 void static inline start_out_timer()
 {
   HAL_TIM_Base_Start_IT(OUT_TIM);
+  HAL_TIM_OC_Start_IT(OUT_TIM, TIM_CHANNEL_1);
 
   __HAL_TIM_SET_COUNTER(OUT_TIM, 0);
-  __HAL_TIM_SET_COMPARE(OUT_TIM, TIM_CHANNEL_1, aOC_DMA_val[0]);
-  HAL_TIM_OC_Start_DMA(OUT_TIM, TIM_CHANNEL_1, &aOC_DMA_val[1], (OUT_STEP_MULT*2 - 1));
+  __HAL_TIM_SET_COMPARE(OUT_TIM, TIM_CHANNEL_1, 0);
+  HAL_TIM_OC_Start_DMA(OUT_TIM, TIM_CHANNEL_1, aOC_DMA_val, OUT_STEP_MULT*2);
 }
 
 
@@ -212,10 +213,12 @@ void update_out_timer_presc()
     for ( axis = AXIS_CNT; axis--; )
     {
       auwOutDelayMax[axis] = aulPeriod[axis] / uwMinPeriod;
+      if ( auwOutDelayMax[axis] ) --auwOutDelayMax[axis];
 
       if ( auwOutDelay[axis] )
       {
         auwOutDelay[axis] *= uhOutTimPresc / uhOutTimPrescPrev;
+        if ( auwOutDelay[axis] ) --auwOutDelay[axis];
       }
     }
   }
@@ -230,16 +233,18 @@ void process_input_step(uint8_t axis)
   static uint64_t ulInputTime = 0;
 
   // update input steps count
-  auwSteps[axis] += 2;
+  auwSteps[axis] += OUT_STEP_MULT*2;
 
   // update input step period
   ulInputTime = time_us();
   aulPeriod[axis] = ulInputTime - aulTime[axis];
+  if ( aulPeriod[axis] > INP_MAX_PERIOD ) aulPeriod[axis] = INP_MAX_PERIOD;
   aulTime[axis] = ulInputTime;
 
   // set output delays
   auwOutDelay[axis] = 0;
   auwOutDelayMax[axis] = aulPeriod[axis] / uhOutTimPresc;
+  if ( auwOutDelayMax[axis] ) --auwOutDelayMax[axis];
 }
 
 // on EXTI 5-9 input
