@@ -51,6 +51,9 @@ DMA_HandleTypeDef hdma_tim1_ch1;
 
 #define CNT_TIM             &htim2 // timer to calculate periods
 #define OUT_TIM             &htim1 // output timer
+#define OUT_TIM_PRESC_PRCNT 90 // %, out timer prescaler compensation
+
+#define WRONG_PERIOD_MULT   8
 
 
 volatile uint32_t uwc = 0; // number of CNT_TIM's updates
@@ -140,7 +143,7 @@ void static inline setup_OC_DMA_array()
 
   aOC_DMA_val[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD;
 }
-// set axis DIR output pins same as inputs
+// set axis output pins same as inputs
 void static inline setup_out_pins()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
@@ -156,6 +159,14 @@ void static inline setup_out_pins()
     );
   }
 }
+// setup vars
+void static inline setup_vars()
+{
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    aulPeriod[axis] = INP_MAX_PERIOD;
+  }
+}
 // enable counter timer interrupts
 void static inline start_counter_timer()
 {
@@ -168,9 +179,8 @@ void static inline start_out_timer()
   HAL_TIM_Base_Start_IT(OUT_TIM);
   HAL_TIM_OC_Start_IT(OUT_TIM, TIM_CHANNEL_1);
 
-  __HAL_TIM_SET_COUNTER(OUT_TIM, 0);
-  __HAL_TIM_SET_COMPARE(OUT_TIM, TIM_CHANNEL_1, 0);
   HAL_TIM_OC_Start_DMA(OUT_TIM, TIM_CHANNEL_1, aOC_DMA_val, OUT_STEP_MULT*2);
+  __HAL_TIM_SET_COMPARE(OUT_TIM, TIM_CHANNEL_1, 0);
 }
 
 
@@ -178,7 +188,7 @@ void static inline start_out_timer()
 
 uint64_t static inline time_us()
 {
-  return (uwc*(0xFFFFFFFF+1) + __HAL_TIM_GET_COUNTER(CNT_TIM));
+  return uwc*(UINT32_MAX+1UL) + __HAL_TIM_GET_COUNTER(CNT_TIM);
 }
 
 
@@ -192,35 +202,19 @@ void update_out_timer_presc()
   static uint32_t uwMinPeriod = 0;
 
   // find minimal input period from all axes
-  for ( uwMinPeriod = 0xFFFFFFFF, axis = AXIS_CNT; axis--; )
+  for ( uwMinPeriod = UINT32_MAX, axis = AXIS_CNT; axis--; )
   {
-    if ( auwSteps[axis] && aulPeriod[axis] < uwMinPeriod )
-    {
-      uwMinPeriod = aulPeriod[axis];
-    }
+    if ( aulPeriod[axis] < uwMinPeriod ) uwMinPeriod = aulPeriod[axis];
   }
 
   // if we need to change output timer's prescaler
-  if ( uwMinPeriod != 0xFFFFFFFF && uhOutTimPresc != uwMinPeriod )
+  if ( uwMinPeriod != UINT32_MAX && uhOutTimPresc != uwMinPeriod )
   {
     // save old prescaler
     uhOutTimPrescPrev = uhOutTimPresc;
     // set new prescaler
-    uhOutTimPresc = uwMinPeriod;
+    uhOutTimPresc = uwMinPeriod * OUT_TIM_PRESC_PRCNT / 100;
     __HAL_TIM_SET_PRESCALER(OUT_TIM, uhOutTimPresc);
-
-    // update output delays for all axes
-    for ( axis = AXIS_CNT; axis--; )
-    {
-      auwOutDelayMax[axis] = aulPeriod[axis] / uwMinPeriod;
-      if ( auwOutDelayMax[axis] ) --auwOutDelayMax[axis];
-
-      if ( auwOutDelay[axis] )
-      {
-        auwOutDelay[axis] *= uhOutTimPresc / uhOutTimPrescPrev;
-        if ( auwOutDelay[axis] ) --auwOutDelay[axis];
-      }
-    }
   }
 }
 
@@ -231,15 +225,24 @@ void update_out_timer_presc()
 void process_input_step(uint8_t axis)
 {
   static uint64_t ulInputTime = 0;
+  static uint64_t ulInputPeriod = 0;
+
+  // get input period
+  ulInputTime = time_us();
+  ulInputPeriod = ulInputTime - aulTime[axis];
+  aulTime[axis] = ulInputTime;
+
+  // check and set input period
+  if (
+    ulInputPeriod < WRONG_PERIOD_MULT*aulPeriod[axis] ||
+    WRONG_PERIOD_MULT*ulInputPeriod > aulPeriod[axis]
+  ) {
+    // set input period
+    aulPeriod[axis] = ulInputPeriod;
+  }
 
   // update input steps count
   auwSteps[axis] += OUT_STEP_MULT*2;
-
-  // update input step period
-  ulInputTime = time_us();
-  aulPeriod[axis] = ulInputTime - aulTime[axis];
-  if ( aulPeriod[axis] > INP_MAX_PERIOD ) aulPeriod[axis] = INP_MAX_PERIOD;
-  aulTime[axis] = ulInputTime;
 
   // set output delays
   auwOutDelay[axis] = 0;
@@ -337,6 +340,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   setup_OC_DMA_array();
   setup_out_pins();
+  setup_vars();
   start_counter_timer();
   start_out_timer();
   /* USER CODE END 2 */
