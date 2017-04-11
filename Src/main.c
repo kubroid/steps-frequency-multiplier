@@ -45,15 +45,15 @@ DMA_HandleTypeDef hdma_tim1_ch1;
 
 /* USER CODE BEGIN PV */
 #define AXIS_CNT            5 // 1..5
-#define OUT_STEP_MULT       10 // 1..100
+#define OUT_STEP_MULT       20 // 1..100
 #define INP_MAX_PERIOD      3000 // us
-
 
 #define CNT_TIM             &htim2 // timer to calculate periods
 #define OUT_TIM             &htim1 // output timer
-#define OUT_TIM_PRESC_PRCNT 90 // %, out timer prescaler compensation
 
+#define OUT_TIME_PRCNT      90 // out time compensation
 #define WRONG_PERIOD_MULT   8
+
 
 
 volatile uint32_t uwc = 0; // number of CNT_TIM's updates
@@ -64,9 +64,12 @@ volatile uint16_t uhOutTimPrescPrev = 0;
 volatile uint32_t auwOutDelay[AXIS_CNT] = {0};
 volatile uint32_t auwOutDelayMax[AXIS_CNT] = {0};
 
+volatile uint32_t auwStepToggles[AXIS_CNT] = {0};
 volatile uint32_t auwSteps[AXIS_CNT] = {0};
 volatile uint64_t aulPeriod[AXIS_CNT] = {0};
 volatile uint64_t aulTime[AXIS_CNT] = {0};
+
+volatile uint8_t auqDirs[AXIS_CNT] = {0};
 
 uint32_t aOC_DMA_val[OUT_STEP_MULT*2] = {0};
 
@@ -200,11 +203,13 @@ void update_out_timer_presc()
 {
   static uint8_t axis = 0;
   static uint32_t uwMinPeriod = 0;
+  static uint32_t uwMaxSteps = 0;
 
-  // find minimal input period from all axes
-  for ( uwMinPeriod = UINT32_MAX, axis = AXIS_CNT; axis--; )
+  // find minimal input period and max out steps
+  for ( uwMinPeriod = UINT32_MAX, uwMaxSteps = 0, axis = AXIS_CNT; axis--; )
   {
     if ( aulPeriod[axis] < uwMinPeriod ) uwMinPeriod = aulPeriod[axis];
+    if ( auwSteps[axis] > uwMaxSteps ) uwMaxSteps = auwSteps[axis];
   }
 
   // if we need to change output timer's prescaler
@@ -212,8 +217,17 @@ void update_out_timer_presc()
   {
     // save old prescaler
     uhOutTimPrescPrev = uhOutTimPresc;
+
+    // calculate new prescaler
+    uhOutTimPresc = uwMinPeriod * OUT_TIME_PRCNT / 100;
+    if ( uwMaxSteps )
+    {
+      if ( uwMaxSteps >= uhOutTimPresc ) uhOutTimPresc = 1;
+      else uhOutTimPresc -= uwMaxSteps;
+    }
+    if ( !uhOutTimPresc ) uhOutTimPresc = 1;
+
     // set new prescaler
-    uhOutTimPresc = uwMinPeriod * OUT_TIM_PRESC_PRCNT / 100;
     __HAL_TIM_SET_PRESCALER(OUT_TIM, uhOutTimPresc);
   }
 }
@@ -241,16 +255,17 @@ void process_input_step(uint8_t axis)
     aulPeriod[axis] = ulInputPeriod;
   }
 
-  // update input steps count
-  auwSteps[axis] += OUT_STEP_MULT*2;
-
   // set output delays
-  auwOutDelay[axis] = 0;
-  auwOutDelayMax[axis] = aulPeriod[axis] / uhOutTimPresc;
-  if ( auwOutDelayMax[axis] ) --auwOutDelayMax[axis];
+  auwOutDelayMax[axis] = (aulPeriod[axis] / (uhOutTimPresc + auwSteps[axis])) *
+                         OUT_TIME_PRCNT / 100;
+  auwOutDelay[axis] = auwSteps[axis] ? auwOutDelayMax[axis] : 0;
+
+  // update input steps count
+  if ( !auwSteps[axis] ) auwStepToggles[axis] = OUT_STEP_MULT*2;
+  ++auwSteps[axis];
 }
 
-// on EXTI 5-9 input
+// on EXTI 9-5 input
 void process_input_dirs()
 {
   static uint8_t axis = 0;
@@ -261,10 +276,14 @@ void process_input_dirs()
     {
       __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
 
-      // TODO - proper DIR handling
-#if 0
-      HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
-#endif
+      if ( auwStepToggles[axis] )
+      {
+        auqDirs[axis] = 1;
+      }
+      else
+      {
+        HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
+      }
     }
   }
 }
@@ -283,17 +302,30 @@ void process_output()
       for ( axis = AXIS_CNT; axis--; )
       {
         // if we have some steps to output for the current axis
-        if ( auwSteps[axis] )
+        if ( auwStepToggles[axis] )
         {
           // if it's time to toggle output pin
           if ( !auwOutDelay[axis] )
           {
-            // toggle output pin
+            // toggle step output pin
             HAL_GPIO_TogglePin(aAxisStepOutputs[axis].PORT, aAxisStepOutputs[axis].PIN);
-            // decrease input steps count
-            --auwSteps[axis];
+
             // set new delay
             auwOutDelay[axis] = auwOutDelayMax[axis];
+
+            // decrease input steps count
+            --auwStepToggles[axis];
+            if ( !auwStepToggles[axis] )
+            {
+              --auwSteps[axis];
+              if ( auwSteps[axis] ) auwStepToggles[axis] = OUT_STEP_MULT*2;
+              // toggle DIR pin if needed
+              if ( auqDirs[axis] )
+              {
+                auqDirs[axis] = 0;
+                HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
+              }
+            }
           }
           // just decrease the output delay
           else
@@ -585,7 +617,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : AXIS1_DIR_INPUT_Pin AXIS2_DIR_INPUT_Pin AXIS3_DIR_INPUT_Pin */
   GPIO_InitStruct.Pin = AXIS1_DIR_INPUT_Pin|AXIS2_DIR_INPUT_Pin|AXIS3_DIR_INPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -602,7 +634,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : AXIS4_DIR_INPUT_Pin AXIS5_DIR_INPUT_Pin */
   GPIO_InitStruct.Pin = AXIS4_DIR_INPUT_Pin|AXIS5_DIR_INPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
