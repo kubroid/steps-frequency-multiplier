@@ -53,7 +53,10 @@ DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
 /* USER CODE BEGIN PV */
 #define AXIS_CNT            5 // 1..5
 #define OUT_STEP_MULT       10 // 1..100
+
 #define INP_MAX_PERIOD      3000 // us
+#define WRONG_PERIOD_MULT   8
+
 
 
 static TIM_HandleTypeDef* aAxisTimH[] = {
@@ -213,6 +216,14 @@ void static inline setup_counter()
   uwSysTickClk = HAL_RCC_GetHCLKFreq()/1000;
   uwSysTimeDivUS = HAL_RCC_GetHCLKFreq()/1000000;
 }
+// setup global vars
+void static inline setup_vars()
+{
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    aStepInPeriod[axis] = INP_MAX_PERIOD;
+  }
+}
 
 
 
@@ -282,14 +293,28 @@ uint8_t static inline output(uint8_t axis)
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
-  static uint64_t ulTimeUS = 0;
+  static uint64_t ulInputTime = 0;
+  static uint64_t ulInputPeriod = 0;
 
+  // get input period
+  ulInputTime = time_us();
+  ulInputPeriod = ulInputTime - aStepInTime[axis];
+  aStepInTime[axis] = ulInputTime;
+
+  // check and set input period
+  if (
+    ulInputPeriod < WRONG_PERIOD_MULT*aStepInPeriod[axis] ||
+    WRONG_PERIOD_MULT*ulInputPeriod > aStepInPeriod[axis]
+  ) {
+    // set input period
+    aStepInPeriod[axis] = ulInputPeriod;
+  }
+
+  // update input steps count
   ++aSteps[axis];
-  if ( !output(axis) ) start_output(axis);
 
-  ulTimeUS = time_us();
-  aStepInPeriod[axis] = ulTimeUS - aStepInTime[axis];
-  aStepInTime[axis] = ulTimeUS;
+  // start output if needed
+  if ( !output(axis) ) start_output(axis);
 }
 // on EXTI 5-9 input
 void process_input_dirs()
@@ -370,6 +395,7 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   setup_counter();
+  setup_vars();
   setup_OC_DMA_array();
   setup_out_DIR_pins();
   reset_out_timers_data();
