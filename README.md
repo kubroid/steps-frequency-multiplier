@@ -2,7 +2,8 @@
 Simple steps frequency multiplier based on STM32 dev boards. 
 For use with any CNC/3DPrint controller.
 
-![2017-02-21_202058](https://cloud.githubusercontent.com/assets/16130975/23169236/29a15cdc-f875-11e6-8569-83c2fc136169.png)
+![1](https://cloud.githubusercontent.com/assets/16130975/23888395/eb75af6a-08b1-11e7-86b9-adae2919858f.png)
+![1](https://cloud.githubusercontent.com/assets/16130975/23888399/eb7ce5a0-08b1-11e7-9daf-cbecc38b2927.png)
 
 ## Downloads
 * https://github.com/MX-Master/steps-frequency-multiplier/releases
@@ -20,6 +21,7 @@ For use with any CNC/3DPrint controller.
 
 ### Branches:
 * **STM32F407VETx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F407VETx
+* **STM32F407VETx_OC_DMA_2**: Method based on STM32F407VETx_OC_DMA using only 2 timers for the output
 * **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
 * **STM32F103C8Tx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F103C8Tx
 * **STM32F103C8Tx**: First (non tested) version for the STM32F103C8Tx
