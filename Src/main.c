@@ -40,7 +40,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
@@ -56,10 +55,6 @@ DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
 #define OUT_STEP_MULT       10 // 1..100
 #define INP_MAX_PERIOD      3000 // us
 
-
-
-
-#define CNT_TIM             &htim2 // timer to calculate periods
 
 static TIM_HandleTypeDef* aAxisTimH[] = {
     &htim1,
@@ -88,10 +83,13 @@ volatile uint32_t aSteps[AXIS_CNT] = {0};
 volatile uint32_t aAxisTimPresc[AXIS_CNT] = {0};
 volatile uint32_t aAxisTimPrescPrev[AXIS_CNT] = {0};
 volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
-volatile uint32_t aStepInTime[AXIS_CNT] = {0};
+volatile uint64_t aStepInTime[AXIS_CNT] = {0};
 volatile uint32_t aAxisOutEnabled[AXIS_CNT] = {0};
 
 volatile uint8_t aDir[AXIS_CNT] = {0};
+
+volatile uint32_t uwSysTickClk = 0;
+volatile uint32_t uwSysTimeDivUS = 0;
 
 uint32_t aOC_DMA_val[OUT_STEP_MULT*2] = {0};
 
@@ -135,7 +133,6 @@ void SystemClock_Config(void);
 void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
@@ -143,6 +140,10 @@ static void MX_TIM5_Init(void);
 static void MX_TIM8_Init(void);
 static void MX_NVIC_Init(void);                                    
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+                                
+                                
+                                
+                                
                                 
 
 /* USER CODE BEGIN PFP */
@@ -185,11 +186,6 @@ void static inline setup_out_DIR_pins()
     );
   }
 }
-// enable counter timer interrupts
-void static inline start_counter_timer_it()
-{
-  HAL_TIM_Base_Start_IT(CNT_TIM);
-}
 // start all out timers
 void static inline start_out_timers_it()
 {
@@ -210,6 +206,22 @@ void static inline reset_out_timers_data()
     __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
     __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], 0xFFFF);
   }
+}
+// setup US counter data
+void static inline setup_counter()
+{
+  uwSysTickClk = HAL_RCC_GetHCLKFreq()/1000;
+  uwSysTimeDivUS = HAL_RCC_GetHCLKFreq()/1000000;
+}
+
+
+
+
+// get timestamp in US since system startup
+// value is overloaded after 49.71 days (256*256*256*256 ms)
+uint64_t static inline time_us()
+{
+  return HAL_GetTick()*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
 }
 
 
@@ -270,11 +282,14 @@ uint8_t static inline output(uint8_t axis)
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
+  static uint64_t ulTimeUS = 0;
+
   ++aSteps[axis];
   if ( !output(axis) ) start_output(axis);
 
-  aStepInPeriod[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM) - aStepInTime[axis];
-  aStepInTime[axis] = __HAL_TIM_GET_COUNTER(CNT_TIM);
+  ulTimeUS = time_us();
+  aStepInPeriod[axis] = ulTimeUS - aStepInTime[axis];
+  aStepInTime[axis] = ulTimeUS;
 }
 // on EXTI 5-9 input
 void process_input_dirs()
@@ -344,7 +359,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_TIM2_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
@@ -355,9 +369,9 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
+  setup_counter();
   setup_OC_DMA_array();
   setup_out_DIR_pins();
-  start_counter_timer_it();
   reset_out_timers_data();
   start_out_timers_it();
   /* USER CODE END 2 */
@@ -369,7 +383,6 @@ int main(void)
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
-
   }
   /* USER CODE END 3 */
 
@@ -462,9 +475,6 @@ static void MX_NVIC_Init(void)
   /* TIM1_UP_TIM10_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
-  /* TIM2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM2_IRQn);
   /* TIM3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM3_IRQn);
@@ -551,38 +561,6 @@ static void MX_TIM1_Init(void)
   }
 
   HAL_TIM_MspPostInit(&htim1);
-
-}
-
-/* TIM2 init function */
-static void MX_TIM2_Init(void)
-{
-
-  TIM_ClockConfigTypeDef sClockSourceConfig;
-  TIM_MasterConfigTypeDef sMasterConfig;
-
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = CNT_TIM_PRESCALLER - 1;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = CNT_TIM_PERIOD - 1;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
 
 }
 
