@@ -40,8 +40,8 @@
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
-#define OUT_TIM_BASE_PRESCALER 3000
-#define OUT_TIM_BASE_PERIOD 168
+#define OUT_TIM_BASE_PRESCALER 2999
+#define OUT_TIM_BASE_PERIOD 167
 
 #define AXIS4_STEP_OUTPUT_Pin GPIO_PIN_0
 #define AXIS4_STEP_OUTPUT_GPIO_Port GPIOA

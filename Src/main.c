@@ -73,18 +73,9 @@ static uint32_t aAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
 };
-static uint32_t aAxisMaxPeriod[] = {
-    INP_MAX_PERIOD,
-    INP_MAX_PERIOD/2,
-    INP_MAX_PERIOD/2,
-    INP_MAX_PERIOD/2,
-    INP_MAX_PERIOD
-};
 static uint8_t aAxisPrescDiv[] = {1,2,2,2,1};
 
 volatile uint32_t aSteps[AXIS_CNT] = {0};
-volatile uint32_t aAxisTimPresc[AXIS_CNT] = {0};
-volatile uint32_t aAxisTimPrescPrev[AXIS_CNT] = {0};
 volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
 volatile uint64_t aStepInTime[AXIS_CNT] = {0};
 volatile uint32_t aAxisOutEnabled[AXIS_CNT] = {0};
@@ -197,19 +188,6 @@ void static inline start_out_timers_it()
     HAL_TIM_Base_Start_IT(aAxisTimH[axis]);
   }
 }
-// cleanup data for all out timers
-void static inline reset_out_timers_data()
-{
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    aAxisTimPresc[axis] = aAxisMaxPeriod[axis] - 1;
-    aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
-
-    __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], aAxisTimPresc[axis]);
-    __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
-    __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], 0xFFFF);
-  }
-}
 // setup US counter data
 void static inline setup_counter()
 {
@@ -250,15 +228,9 @@ void update_out_timers_presc()
     if ( aSteps[axis] )
     {
       presc = aStepInPeriod[axis] / aAxisPrescDiv[axis];
-      if (!presc || presc > aAxisMaxPeriod[axis]) presc = aAxisMaxPeriod[axis];
+      presc = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
 
-      aAxisTimPrescPrev[axis] = aAxisTimPresc[axis];
-      aAxisTimPresc[axis] = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
-
-      __HAL_TIM_SET_PRESCALER(
-        aAxisTimH[axis],
-        ((aAxisTimPresc[axis] + aAxisTimPrescPrev[axis]) / 2)
-      );
+      __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], presc);
     }
   }
 }
@@ -398,7 +370,6 @@ int main(void)
   setup_vars();
   setup_OC_DMA_array();
   setup_out_DIR_pins();
-  reset_out_timers_data();
   start_out_timers_it();
   /* USER CODE END 2 */
 
@@ -534,9 +505,9 @@ static void MX_TIM1_Init(void)
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
+  htim1.Init.Prescaler = OUT_TIM_BASE_PRESCALER;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
+  htim1.Init.Period = OUT_TIM_BASE_PERIOD;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
@@ -599,9 +570,9 @@ static void MX_TIM3_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
+  htim3.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
+  htim3.Init.Period = OUT_TIM_BASE_PERIOD;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
   {
@@ -648,9 +619,9 @@ static void MX_TIM4_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
+  htim4.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
+  htim4.Init.Period = OUT_TIM_BASE_PERIOD;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
   {
@@ -697,9 +668,9 @@ static void MX_TIM5_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim5.Instance = TIM5;
-  htim5.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
+  htim5.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
   htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim5.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
+  htim5.Init.Period = OUT_TIM_BASE_PERIOD;
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
   {
@@ -747,9 +718,9 @@ static void MX_TIM8_Init(void)
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = (OUT_TIM_BASE_PRESCALER - 1);
+  htim8.Init.Prescaler = OUT_TIM_BASE_PRESCALER;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim8.Init.Period = (OUT_TIM_BASE_PERIOD - 1);
+  htim8.Init.Period = OUT_TIM_BASE_PERIOD;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim8.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
