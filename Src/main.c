@@ -66,7 +66,7 @@ static TIM_HandleTypeDef* aAxisTimH[] = {
     &htim5,
     &htim8
 };
-static uint32_t aAxisTimCh[] = {
+static const uint32_t aAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_3,
     TIM_CHANNEL_1,
