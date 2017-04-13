@@ -275,7 +275,7 @@ void process_input_step(uint8_t axis)
 
   // check and set input period
   if (
-    ulInputPeriod < WRONG_PERIOD_MULT*aStepInPeriod[axis] ||
+    ulInputPeriod < WRONG_PERIOD_MULT*aStepInPeriod[axis] &&
     WRONG_PERIOD_MULT*ulInputPeriod > aStepInPeriod[axis]
   ) {
     // set input period
