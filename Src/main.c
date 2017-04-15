@@ -52,68 +52,69 @@ DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
 
 /* USER CODE BEGIN PV */
 #define AXIS_CNT            5 // 1..5
-#define OUT_STEP_MULT       10 // 1..100
+#define OUT_STEP_MULT       10 // 1..84
 
-#define INP_MAX_PERIOD      3000 // us
-#define WRONG_PERIOD_MULT   8
+#define STARTUP_PERIOD      4096 // us
+#define MAX_PERIOD          65536 // us
+#define MAX_PERIOD_MULT     4
 
 
 
-static TIM_HandleTypeDef* aAxisTimH[] = {
+static TIM_HandleTypeDef* ahAxisTim[] = {
     &htim1,
     &htim3,
     &htim4,
     &htim5,
     &htim8
 };
-static const uint32_t aAxisTimCh[] = {
+static const uint32_t auwAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_3,
     TIM_CHANNEL_1,
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
 };
-static uint8_t aAxisPrescDiv[] = {1,2,2,2,1};
+static uint8_t auqPrescDiv[] = {1,2,2,2,1};
 
-volatile uint32_t aSteps[AXIS_CNT] = {0};
-volatile uint32_t aStepInPeriod[AXIS_CNT] = {0};
-volatile uint64_t aStepInTime[AXIS_CNT] = {0};
-volatile uint32_t aAxisOutEnabled[AXIS_CNT] = {0};
-
-volatile uint8_t aDir[AXIS_CNT] = {0};
+volatile uint32_t auwSteps[AXIS_CNT] = {0};
+volatile uint8_t auqDirs[AXIS_CNT] = {0};
+volatile uint32_t auwPeriod[AXIS_CNT] = {0};
+volatile uint64_t aulTime[AXIS_CNT] = {0};
+volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
+volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 
 volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
-uint32_t aOC_DMA_val[OUT_STEP_MULT*2] = {0};
+uint32_t auwOCDMAVal[OUT_STEP_MULT*2] = {0};
 
 struct PORT_PIN_t
 {
   GPIO_TypeDef*   PORT;
   uint16_t        PIN;
 };
-const struct PORT_PIN_t aAxisStepInputs[] = {
+const struct PORT_PIN_t saAxisStepInputs[] = {
   {AXIS1_STEP_INPUT_GPIO_Port, AXIS1_STEP_INPUT_Pin},
   {AXIS2_STEP_INPUT_GPIO_Port, AXIS2_STEP_INPUT_Pin},
   {AXIS3_STEP_INPUT_GPIO_Port, AXIS3_STEP_INPUT_Pin},
   {AXIS4_STEP_INPUT_GPIO_Port, AXIS4_STEP_INPUT_Pin},
   {AXIS5_STEP_INPUT_GPIO_Port, AXIS5_STEP_INPUT_Pin}
 };
-const struct PORT_PIN_t aAxisDirInputs[] = {
+const struct PORT_PIN_t saAxisDirInputs[] = {
   {AXIS1_DIR_INPUT_GPIO_Port, AXIS1_DIR_INPUT_Pin},
   {AXIS2_DIR_INPUT_GPIO_Port, AXIS2_DIR_INPUT_Pin},
   {AXIS3_DIR_INPUT_GPIO_Port, AXIS3_DIR_INPUT_Pin},
   {AXIS4_DIR_INPUT_GPIO_Port, AXIS4_DIR_INPUT_Pin},
   {AXIS5_DIR_INPUT_GPIO_Port, AXIS5_DIR_INPUT_Pin}
 };
-const struct PORT_PIN_t aAxisStepOutputs[] = {
+const struct PORT_PIN_t saAxisStepOutputs[] = {
   {AXIS1_STEP_OUTPUT_GPIO_Port, AXIS1_STEP_OUTPUT_Pin},
   {AXIS2_STEP_OUTPUT_GPIO_Port, AXIS2_STEP_OUTPUT_Pin},
   {AXIS3_STEP_OUTPUT_GPIO_Port, AXIS3_STEP_OUTPUT_Pin},
   {AXIS4_STEP_OUTPUT_GPIO_Port, AXIS4_STEP_OUTPUT_Pin},
   {AXIS5_STEP_OUTPUT_GPIO_Port, AXIS5_STEP_OUTPUT_Pin}
 };
-const struct PORT_PIN_t aAxisDirOutputs[] = {
+const struct PORT_PIN_t saAxisDirOutputs[] = {
   {AXIS1_DIR_OUTPUT_GPIO_Port, AXIS1_DIR_OUTPUT_Pin},
   {AXIS2_DIR_OUTPUT_GPIO_Port, AXIS2_DIR_OUTPUT_Pin},
   {AXIS3_DIR_OUTPUT_GPIO_Port, AXIS3_DIR_OUTPUT_Pin},
@@ -164,10 +165,10 @@ void static inline setup_OC_DMA_array()
       c += uhWidth;
     }
 
-    aOC_DMA_val[i] = c;
+    auwOCDMAVal[i] = c;
   }
 
-  aOC_DMA_val[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD - 1;
+  auwOCDMAVal[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD - 1;
 }
 // set axis DIR output pins same as inputs
 void static inline setup_out_DIR_pins()
@@ -175,17 +176,33 @@ void static inline setup_out_DIR_pins()
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
     HAL_GPIO_WritePin(
-      aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(aAxisDirInputs[axis].PORT, aAxisDirInputs[axis].PIN)
+      saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN,
+      HAL_GPIO_ReadPin(saAxisDirInputs[axis].PORT, saAxisDirInputs[axis].PIN)
     );
   }
 }
 // start all out timers
-void static inline start_out_timers_it()
+void static inline start_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    HAL_TIM_Base_Start_IT(aAxisTimH[axis]);
+    // set startup prescaler
+    __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], STARTUP_PERIOD);
+
+    /* Enable the TIM Update interrupt */
+    __HAL_TIM_ENABLE_IT(ahAxisTim[axis], TIM_IT_UPDATE);
+
+    /* Enable the main output */
+    if(IS_TIM_ADVANCED_INSTANCE(ahAxisTim[axis]->Instance) != RESET)
+    {
+      __HAL_TIM_MOE_ENABLE(ahAxisTim[axis]);
+    }
+
+    /* Enable the Peripheral */
+    __HAL_TIM_ENABLE(ahAxisTim[axis]);
+
+    /* Enable the Output compare channel */
+    TIM_CCxChannelCmd(ahAxisTim[axis]->Instance, auwAxisTimCh[axis], TIM_CCx_ENABLE);
   }
 }
 // setup US counter data
@@ -193,14 +210,6 @@ void static inline setup_counter()
 {
   uwSysTickClk = HAL_RCC_GetHCLKFreq()/1000;
   uwSysTimeDivUS = HAL_RCC_GetHCLKFreq()/1000000;
-}
-// setup global vars
-void static inline setup_vars()
-{
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    aStepInPeriod[axis] = INP_MAX_PERIOD;
-  }
 }
 
 
@@ -221,16 +230,35 @@ uint64_t static inline time_us()
 void update_out_timers_presc()
 {
   static uint8_t axis = 0;
-  static uint32_t presc = 0;
+  static uint32_t uwPrescCur = 0;
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( aSteps[axis] )
+    if ( auwSteps[axis] )
     {
-      presc = aStepInPeriod[axis] / aAxisPrescDiv[axis];
-      presc = aSteps[axis] < presc ? (presc - aSteps[axis]) : 0;
+      // calculate input period
+      auwPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
+      // check input period
+      if ( auwPeriod[axis] < MAX_PERIOD )
+      {
+        // period is correct
+      }
+      else if ( auwPeriod[axis] < MAX_PERIOD*MAX_PERIOD_MULT )
+      {
+        auwPeriod[axis] = MAX_PERIOD;
+      }
+      else
+      {
+        auwPeriod[axis] = STARTUP_PERIOD;
+      }
 
-      __HAL_TIM_SET_PRESCALER(aAxisTimH[axis], presc);
+      // calculate the new prescaler
+      uwPrescCur = auwPeriod[axis] / auqPrescDiv[axis];
+      // correcting new prescaler
+      if ( auwSteps[axis] < 100 ) uwPrescCur = uwPrescCur * (100 - auwSteps[axis]) / 100;
+      else uwPrescCur = 0;
+      // set new prescaler
+      __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], uwPrescCur);
     }
   }
 }
@@ -238,25 +266,146 @@ void update_out_timers_presc()
 
 
 
+/**
+  * @brief  Starts the TIM Output Compare signal generation in DMA mode.
+  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
+  *                the configuration information for TIM module.
+  * @param  Channel: TIM Channel to be enabled.
+  *          This parameter can be one of the following values:
+  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
+  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
+  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
+  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
+  * @param  pData: The source Buffer address.
+  * @param  Length: The length of data to be transferred from memory to TIM peripheral
+  * @retval HAL status
+  */
+HAL_StatusTypeDef TIM_OC_Start_DMA(TIM_HandleTypeDef *htim, uint32_t Channel, uint32_t *pData, uint16_t Length)
+{
+  htim->State = HAL_TIM_STATE_BUSY;
+
+  switch (Channel)
+  {
+    case TIM_CHANNEL_1:
+    {
+      /* Enable the DMA Stream */
+      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC1], (uint32_t)pData, (uint32_t)&htim->Instance->CCR1, Length);
+
+      /* Enable the TIM Capture/Compare 1 DMA request */
+      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC1);
+    }
+    break;
+
+    case TIM_CHANNEL_2:
+    {
+      /* Enable the DMA Stream */
+      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC2], (uint32_t)pData, (uint32_t)&htim->Instance->CCR2, Length);
+
+      /* Enable the TIM Capture/Compare 2 DMA request */
+      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC2);
+    }
+    break;
+
+    case TIM_CHANNEL_3:
+    {
+      /* Enable the DMA Stream */
+      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC3], (uint32_t)pData, (uint32_t)&htim->Instance->CCR3,Length);
+
+      /* Enable the TIM Capture/Compare 3 DMA request */
+      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC3);
+    }
+    break;
+
+    case TIM_CHANNEL_4:
+    {
+      /* Enable the DMA Stream */
+      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC4], (uint32_t)pData, (uint32_t)&htim->Instance->CCR4, Length);
+
+      /* Enable the TIM Capture/Compare 4 DMA request */
+      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC4);
+    }
+    break;
+  }
+
+  /* Return function status */
+  return HAL_OK;
+}
+/**
+  * @brief  Stops the TIM Output Compare signal generation in DMA mode.
+  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
+  *                the configuration information for TIM module.
+  * @param  Channel: TIM Channel to be disabled.
+  *          This parameter can be one of the following values:
+  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
+  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
+  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
+  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
+  * @retval HAL status
+  */
+HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
+{
+  switch (Channel)
+  {
+    case TIM_CHANNEL_1:
+    {
+      /* Disable the TIM Capture/Compare 1 DMA request */
+      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC1);
+    }
+    break;
+
+    case TIM_CHANNEL_2:
+    {
+      /* Disable the TIM Capture/Compare 2 DMA request */
+      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC2);
+    }
+    break;
+
+    case TIM_CHANNEL_3:
+    {
+      /* Disable the TIM Capture/Compare 3 DMA request */
+      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC3);
+    }
+    break;
+
+    case TIM_CHANNEL_4:
+    {
+      /* Disable the TIM Capture/Compare 4 interrupt */
+      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC4);
+    }
+    break;
+
+    default:
+    break;
+  }
+
+  /* Change the htim state */
+  htim->State = HAL_TIM_STATE_READY;
+
+  /* Return function status */
+  return HAL_OK;
+}
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
-  aAxisOutEnabled[axis] = 1;
-  __HAL_TIM_SET_COUNTER(aAxisTimH[axis], 0);
-  __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], aOC_DMA_val[0]);
-  HAL_TIM_OC_Start_DMA(aAxisTimH[axis], aAxisTimCh[axis], &aOC_DMA_val[1], (OUT_STEP_MULT*2 - 1));
+  auqOutputOn[axis] = 1;
+  __HAL_TIM_SET_COUNTER(ahAxisTim[axis], 0);
+  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
+  TIM_OC_Start_DMA(ahAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
 }
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  __HAL_TIM_SET_COMPARE(aAxisTimH[axis], aAxisTimCh[axis], 0xFFFF);
-  HAL_TIM_OC_Stop_DMA(aAxisTimH[axis], aAxisTimCh[axis]);
-  aAxisOutEnabled[axis] = 0;
+  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
+  // TODO - while stoping output don't touch timer's base IT
+  // update events of a timer must always hapens
+  // it needs to update timer's prescaler because it's value is buffered
+  TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
+  auqOutputOn[axis] = 0;
 }
 // get output enabled flag
 uint8_t static inline output(uint8_t axis)
 {
-  return aAxisOutEnabled[axis];
+  return auqOutputOn[axis];
 }
 
 
@@ -265,25 +414,12 @@ uint8_t static inline output(uint8_t axis)
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
-  static uint64_t ulInputTime = 0;
-  static uint64_t ulInputPeriod = 0;
-
-  // get input period
-  ulInputTime = time_us();
-  ulInputPeriod = ulInputTime - aStepInTime[axis];
-  aStepInTime[axis] = ulInputTime;
-
-  // check and set input period
-  if (
-    ulInputPeriod < WRONG_PERIOD_MULT*aStepInPeriod[axis] &&
-    WRONG_PERIOD_MULT*ulInputPeriod > aStepInPeriod[axis]
-  ) {
-    // set input period
-    aStepInPeriod[axis] = ulInputPeriod;
-  }
+  // get/save input step timestamp
+  aulTimePrev[axis] = aulTime[axis];
+  aulTime[axis] = time_us();
 
   // update input steps count
-  ++aSteps[axis];
+  ++auwSteps[axis];
 
   // start output if needed
   if ( !output(axis) ) start_output(axis);
@@ -295,18 +431,17 @@ void process_input_dirs()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( __HAL_GPIO_EXTI_GET_IT(aAxisDirInputs[axis].PIN) )
+    if ( __HAL_GPIO_EXTI_GET_IT(saAxisDirInputs[axis].PIN) )
     {
-      __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
+      __HAL_GPIO_EXTI_CLEAR_IT(saAxisDirInputs[axis].PIN);
 
-      if ( output(axis) )
-      {
-        aDir[axis] = 1;
-      }
-      else
-      {
-        HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
-      }
+      // get/save input DIR timestamp
+      aulTimePrev[axis] = aulTime[axis];
+      aulTime[axis] = time_us();
+
+      // toggle DIR or wait until currnet output steps pack will be finished
+      if ( output(axis) ) ++auqDirs[axis];
+      else HAL_GPIO_TogglePin(saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN);
     }
   }
 }
@@ -314,24 +449,24 @@ void process_input_dirs()
 void on_axis_tim_update(uint8_t axis)
 {
   /* TIM Update event */
-  if ( __HAL_TIM_GET_FLAG(aAxisTimH[axis], TIM_FLAG_UPDATE) )
+  if ( __HAL_TIM_GET_FLAG(ahAxisTim[axis], TIM_FLAG_UPDATE) )
   {
-    if ( __HAL_TIM_GET_IT_SOURCE(aAxisTimH[axis], TIM_IT_UPDATE) )
+    if ( __HAL_TIM_GET_IT_SOURCE(ahAxisTim[axis], TIM_IT_UPDATE) )
     {
-      __HAL_TIM_CLEAR_IT(aAxisTimH[axis], TIM_IT_UPDATE);
+      __HAL_TIM_CLEAR_IT(ahAxisTim[axis], TIM_IT_UPDATE);
 
       if ( output(axis) )
       {
         stop_output(axis);
-        --aSteps[axis];
+        --auwSteps[axis];
 
-        if ( aDir[axis] )
+        if ( auqDirs[axis] )
         {
-          aDir[axis] = 0;
-          HAL_GPIO_TogglePin(aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN);
+          --auqDirs[axis];
+          HAL_GPIO_TogglePin(saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN);
         }
 
-        if ( aSteps[axis] ) start_output(axis);
+        if ( auwSteps[axis] ) start_output(axis);
       }
     }
   }
@@ -367,10 +502,9 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   setup_counter();
-  setup_vars();
   setup_OC_DMA_array();
   setup_out_DIR_pins();
-  start_out_timers_it();
+  start_out_timers();
   /* USER CODE END 2 */
 
   /* Infinite loop */
