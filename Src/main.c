@@ -396,9 +396,6 @@ void static inline start_output(uint8_t axis)
 void static inline stop_output(uint8_t axis)
 {
   __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
-  // TODO - while stoping output don't touch timer's base IT
-  // update events of a timer must always hapens
-  // it needs to update timer's prescaler because it's value is buffered
   TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
   auqOutputOn[axis] = 0;
 }
