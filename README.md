@@ -19,9 +19,12 @@ For use with any CNC/3DPrint controller.
 * Uses **EXTI** to capture input pulses
 * Uses timer's **OC** mode with DMA for the output
 
-### Branches:
+### Active branches:
 * **STM32F407VETx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F407VETx
 * **STM32F407VETx_OC_DMA_2**: Method based on STM32F407VETx_OC_DMA using only 2 timers for the output
+* **F407VETx_BUF**: Another method of output for the STM32F407VETx using buffer and timer's OC+DMA
+
+### Other branches:
 * **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
 * **STM32F103C8Tx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F103C8Tx
 * **STM32F103C8Tx**: First (non tested) version for the STM32F103C8Tx
