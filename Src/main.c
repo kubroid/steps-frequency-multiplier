@@ -40,86 +40,151 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
-TIM_HandleTypeDef htim8;
-DMA_HandleTypeDef hdma_tim1_ch1;
-DMA_HandleTypeDef hdma_tim3_ch3;
-DMA_HandleTypeDef hdma_tim4_ch1;
-DMA_HandleTypeDef hdma_tim5_ch1;
-DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
+DMA_HandleTypeDef hdma_tim1_ch3;
 
 /* USER CODE BEGIN PV */
-#define AXIS_CNT            5 // 1..5
-#define OUT_STEP_MULT       10 // 1..84
 
-#define STARTUP_PERIOD      4096 // us
-#define MAX_PERIOD          65536 // us
-#define MAX_PERIOD_MULT     4
+// SETTINGS
+
+#define AXIS_CNT            1     // axis count = 1..5
+#define OUT_STEP_MULT       10    // steps frequency multiplier = 1..100
+#define MAX_INPUT_FREQ      50    // KHz, max input steps frequency
 
 
 
-static TIM_HandleTypeDef* ahAxisTim[] = {
-    &htim1,
-    &htim3,
-    &htim4,
-    &htim5,
-    &htim8
+
+// OUTPUT TIMERS
+
+static TIM_HandleTypeDef* aAxisTim[] = { // links to the output timers
+    &htim1, // axis 0
+    &htim2, // axis 1
+    &htim3, // axis 2
+    &htim4, // axis 3
+    &htim5  // axis 4
 };
-static const uint32_t auwAxisTimCh[] = {
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_3,
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_4
+static const uint32_t auwAxisTimStepCh[] = { // list of STEP output channels
+    TIM_CHANNEL_3,  // axis 0
+    TIM_CHANNEL_3,  // axis 1
+    TIM_CHANNEL_1,  // axis 2
+    TIM_CHANNEL_1,  // axis 3
+    TIM_CHANNEL_3   // axis 4
 };
-static uint8_t auqPrescDiv[] = {1,2,2,2,1};
+static const uint32_t auwAxisTimDirCh[] = { // list of DIR output channels
+    TIM_CHANNEL_4,  // axis 0
+    TIM_CHANNEL_4,  // axis 1
+    TIM_CHANNEL_2,  // axis 2
+    TIM_CHANNEL_2,  // axis 3
+    TIM_CHANNEL_4   // axis 4
+};
+static const uint32_t auwTimSourceFreq[] = { // source frequencies of the timers
+    168000000,  // axis 0
+     84000000,  // axis 1
+     84000000,  // axis 2
+     84000000,  // axis 3
+     84000000   // axis 4
+};
 
-volatile uint32_t auwSteps[AXIS_CNT] = {0};
-volatile uint8_t auqDirs[AXIS_CNT] = {0};
-volatile uint32_t auwPeriod[AXIS_CNT] = {0};
-volatile uint64_t aulTime[AXIS_CNT] = {0};
-volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
+
+
+
+// OUTPUT BUFFER
+
+#define OUT_BUF_SIZE 256
+
+struct OUTBUF_t
+{
+  int16_t   hCount;
+  uint16_t  uhTime;
+};
+
+volatile struct OUTBUF_t aBuf[AXIS_CNT][OUT_BUF_SIZE] = {{{0}}};
+volatile uint8_t auqBufAddPos[AXIS_CNT] = {0};
+volatile uint8_t auqBufOutPos[AXIS_CNT] = {0};
+
+
+
+
+// INPUT STEPS
+volatile uint16_t auhSteps[AXIS_CNT] = {0};
+
+
+
+
+// SERVO CYCLE
+volatile uint64_t ulTime = 0;
+volatile uint64_t ulTimePrev = 0;
+
+
+
+
+// OUTPUT STATE
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 
+
+
+
+// SYSTICK BASED COUNTER
 volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
-uint32_t auwOCDMAVal[OUT_STEP_MULT*2] = {0};
+
+
+
+// OC DMA ARRAY
+
+#define DMA_ARRAY_SIZE (MAX_INPUT_FREQ * OUT_STEP_MULT * 2)
+
+uint16_t auhOCDMAVal[DMA_ARRAY_SIZE] = {0};
+
+
+
+
+// PINOUT
 
 struct PORT_PIN_t
 {
   GPIO_TypeDef*   PORT;
   uint16_t        PIN;
 };
-const struct PORT_PIN_t saAxisStepInputs[] = {
+const struct PORT_PIN_t aAxisStepInputs[] = {
   {AXIS1_STEP_INPUT_GPIO_Port, AXIS1_STEP_INPUT_Pin},
+#if 0
   {AXIS2_STEP_INPUT_GPIO_Port, AXIS2_STEP_INPUT_Pin},
   {AXIS3_STEP_INPUT_GPIO_Port, AXIS3_STEP_INPUT_Pin},
   {AXIS4_STEP_INPUT_GPIO_Port, AXIS4_STEP_INPUT_Pin},
   {AXIS5_STEP_INPUT_GPIO_Port, AXIS5_STEP_INPUT_Pin}
+#endif
 };
-const struct PORT_PIN_t saAxisDirInputs[] = {
+const struct PORT_PIN_t aAxisDirInputs[] = {
   {AXIS1_DIR_INPUT_GPIO_Port, AXIS1_DIR_INPUT_Pin},
+#if 0
   {AXIS2_DIR_INPUT_GPIO_Port, AXIS2_DIR_INPUT_Pin},
   {AXIS3_DIR_INPUT_GPIO_Port, AXIS3_DIR_INPUT_Pin},
   {AXIS4_DIR_INPUT_GPIO_Port, AXIS4_DIR_INPUT_Pin},
   {AXIS5_DIR_INPUT_GPIO_Port, AXIS5_DIR_INPUT_Pin}
+#endif
 };
-const struct PORT_PIN_t saAxisStepOutputs[] = {
+const struct PORT_PIN_t aAxisStepOutputs[] = {
   {AXIS1_STEP_OUTPUT_GPIO_Port, AXIS1_STEP_OUTPUT_Pin},
+#if 0
   {AXIS2_STEP_OUTPUT_GPIO_Port, AXIS2_STEP_OUTPUT_Pin},
   {AXIS3_STEP_OUTPUT_GPIO_Port, AXIS3_STEP_OUTPUT_Pin},
   {AXIS4_STEP_OUTPUT_GPIO_Port, AXIS4_STEP_OUTPUT_Pin},
   {AXIS5_STEP_OUTPUT_GPIO_Port, AXIS5_STEP_OUTPUT_Pin}
+#endif
 };
-const struct PORT_PIN_t saAxisDirOutputs[] = {
+const struct PORT_PIN_t aAxisDirOutputs[] = {
   {AXIS1_DIR_OUTPUT_GPIO_Port, AXIS1_DIR_OUTPUT_Pin},
+#if 0
   {AXIS2_DIR_OUTPUT_GPIO_Port, AXIS2_DIR_OUTPUT_Pin},
   {AXIS3_DIR_OUTPUT_GPIO_Port, AXIS3_DIR_OUTPUT_Pin},
   {AXIS4_DIR_OUTPUT_GPIO_Port, AXIS4_DIR_OUTPUT_Pin},
   {AXIS5_DIR_OUTPUT_GPIO_Port, AXIS5_DIR_OUTPUT_Pin}
+#endif
 };
 /* USER CODE END PV */
 
@@ -129,10 +194,10 @@ void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM5_Init(void);
-static void MX_TIM8_Init(void);
 static void MX_NVIC_Init(void);                                    
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
@@ -150,61 +215,51 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 // setup DMA array values
 void static inline setup_OC_DMA_array()
 {
-  uint16_t uhWidth = OUT_TIM_BASE_PERIOD / (OUT_STEP_MULT*2);
-  uint16_t uhWidthDivLost = OUT_TIM_BASE_PERIOD % (OUT_STEP_MULT*2);
-
-  for ( uint16_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
-  {
-    if ( uhWidthDivLost )
-    {
-      c += uhWidth + 1;
-      --uhWidthDivLost;
-    }
-    else
-    {
-      c += uhWidth;
-    }
-
-    auwOCDMAVal[i] = c;
-  }
-
-  auwOCDMAVal[OUT_STEP_MULT*2 - 1] = OUT_TIM_BASE_PERIOD - 1;
+  // auhOCDMAVal = {0,1,2,3,4,...}
+  for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal[i] = i;
 }
-// set axis DIR output pins same as inputs
-void static inline setup_out_DIR_pins()
+
+// set axis output pins same as inputs
+void static inline setup_out_pins()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    HAL_GPIO_WritePin(
-      saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(saAxisDirInputs[axis].PORT, saAxisDirInputs[axis].PIN)
+    HAL_GPIO_WritePin( aAxisStepOutputs[axis].PORT, aAxisStepOutputs[axis].PIN,
+      HAL_GPIO_ReadPin(aAxisStepInputs[axis].PORT, aAxisStepInputs[axis].PIN)
+    );
+    HAL_GPIO_WritePin( aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN,
+      HAL_GPIO_ReadPin(aAxisDirInputs[axis].PORT, aAxisDirInputs[axis].PIN)
     );
   }
 }
+
+#if 0
 // start all out timers
 void static inline start_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
     // set startup prescaler
-    __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], STARTUP_PERIOD);
+    __HAL_TIM_SET_PRESCALER(aAxisTim[axis], STARTUP_PERIOD);
 
     /* Enable the TIM Update interrupt */
-    __HAL_TIM_ENABLE_IT(ahAxisTim[axis], TIM_IT_UPDATE);
+    __HAL_TIM_ENABLE_IT(aAxisTim[axis], TIM_IT_UPDATE);
 
     /* Enable the main output */
-    if(IS_TIM_ADVANCED_INSTANCE(ahAxisTim[axis]->Instance) != RESET)
+    if(IS_TIM_ADVANCED_INSTANCE(aAxisTim[axis]->Instance) != RESET)
     {
-      __HAL_TIM_MOE_ENABLE(ahAxisTim[axis]);
+      __HAL_TIM_MOE_ENABLE(aAxisTim[axis]);
     }
 
     /* Enable the Peripheral */
-    __HAL_TIM_ENABLE(ahAxisTim[axis]);
+    __HAL_TIM_ENABLE(aAxisTim[axis]);
 
     /* Enable the Output compare channel */
-    TIM_CCxChannelCmd(ahAxisTim[axis]->Instance, auwAxisTimCh[axis], TIM_CCx_ENABLE);
+    TIM_CCxChannelCmd(aAxisTim[axis]->Instance, auwAxisTimCh[axis], TIM_CCx_ENABLE);
   }
 }
+#endif
+
 // setup US counter data
 void static inline setup_counter()
 {
@@ -224,7 +279,7 @@ uint64_t static inline time_us()
 
 
 
-
+#if 0
 // update prescallers for the active output timers
 // every 1000us (on systick event)
 void update_out_timers_presc()
@@ -258,14 +313,14 @@ void update_out_timers_presc()
       if ( auwSteps[axis] < 100 ) uwPrescCur = uwPrescCur * (100 - auwSteps[axis]) / 100;
       else uwPrescCur = 0;
       // set new prescaler
-      __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], uwPrescCur);
+      __HAL_TIM_SET_PRESCALER(aAxisTim[axis], uwPrescCur);
     }
   }
 }
+#endif
 
 
-
-
+#if 0
 /**
   * @brief  Starts the TIM Output Compare signal generation in DMA mode.
   * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
@@ -330,6 +385,9 @@ HAL_StatusTypeDef TIM_OC_Start_DMA(TIM_HandleTypeDef *htim, uint32_t Channel, ui
   /* Return function status */
   return HAL_OK;
 }
+#endif
+
+#if 0
 /**
   * @brief  Stops the TIM Output Compare signal generation in DMA mode.
   * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
@@ -384,43 +442,65 @@ HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
   /* Return function status */
   return HAL_OK;
 }
+#endif
+
+#if 0
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
   auqOutputOn[axis] = 1;
-  __HAL_TIM_SET_COUNTER(ahAxisTim[axis], 0);
-  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
-  TIM_OC_Start_DMA(ahAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
+  __HAL_TIM_SET_COUNTER(aAxisTim[axis], 0);
+  __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
+  TIM_OC_Start_DMA(aAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
 }
+#endif
+
+#if 0
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
-  TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
+  __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
+  TIM_OC_Stop_DMA(aAxisTim[axis], auwAxisTimCh[axis]);
   auqOutputOn[axis] = 0;
 }
+#endif
+
+#if 0
 // get output enabled flag
 uint8_t static inline output(uint8_t axis)
 {
   return auqOutputOn[axis];
 }
+#endif
 
 
 
 
 // on EXTI 4-0 input
+void process_servo_cycle()
+{
+  static uint8_t axis = 0;
+
+  ulTime = time_us();
+
+  // TODO - process servo cycle
+  // ...
+
+  for ( axis = AXIS_CNT; axis--; )
+  {
+    auhSteps[axis] = 0;
+  }
+
+  ulTimePrev = ulTime;
+}
+
+// on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
-  // get/save input step timestamp
-  aulTimePrev[axis] = aulTime[axis];
-  aulTime[axis] = time_us();
-
   // update input steps count
-  ++auwSteps[axis];
-
-  // start output if needed
-  if ( !output(axis) ) start_output(axis);
+  ++auhSteps[axis];
 }
+
 // on EXTI 5-9 input
 void process_input_dirs()
 {
@@ -428,43 +508,28 @@ void process_input_dirs()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( __HAL_GPIO_EXTI_GET_IT(saAxisDirInputs[axis].PIN) )
+    if ( __HAL_GPIO_EXTI_GET_IT(aAxisDirInputs[axis].PIN) )
     {
-      __HAL_GPIO_EXTI_CLEAR_IT(saAxisDirInputs[axis].PIN);
+      __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
 
-      // get/save input DIR timestamp
-      aulTimePrev[axis] = aulTime[axis];
-      aulTime[axis] = time_us();
-
-      // toggle DIR or wait until currnet output steps pack will be finished
-      if ( output(axis) ) ++auqDirs[axis];
-      else HAL_GPIO_TogglePin(saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN);
+      // TODO - process input DIRs
+      // ...
     }
   }
 }
+
 // on axis TIM update
 void on_axis_tim_update(uint8_t axis)
 {
   /* TIM Update event */
-  if ( __HAL_TIM_GET_FLAG(ahAxisTim[axis], TIM_FLAG_UPDATE) )
+  if ( __HAL_TIM_GET_FLAG(aAxisTim[axis], TIM_FLAG_UPDATE) )
   {
-    if ( __HAL_TIM_GET_IT_SOURCE(ahAxisTim[axis], TIM_IT_UPDATE) )
+    if ( __HAL_TIM_GET_IT_SOURCE(aAxisTim[axis], TIM_IT_UPDATE) )
     {
-      __HAL_TIM_CLEAR_IT(ahAxisTim[axis], TIM_IT_UPDATE);
+      __HAL_TIM_CLEAR_IT(aAxisTim[axis], TIM_IT_UPDATE);
 
-      if ( output(axis) )
-      {
-        stop_output(axis);
-        --auwSteps[axis];
-
-        if ( auqDirs[axis] )
-        {
-          --auqDirs[axis];
-          HAL_GPIO_TogglePin(saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN);
-        }
-
-        if ( auwSteps[axis] ) start_output(axis);
-      }
+      // TODO - process output
+      // ...
     }
   }
 }
@@ -489,10 +554,10 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM5_Init();
-  MX_TIM8_Init();
 
   /* Initialize interrupts */
   MX_NVIC_Init();
@@ -500,8 +565,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   setup_counter();
   setup_OC_DMA_array();
-  setup_out_DIR_pins();
-  start_out_timers();
+  setup_out_pins();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -576,54 +640,15 @@ void SystemClock_Config(void)
 */
 static void MX_NVIC_Init(void)
 {
-  /* EXTI0_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-  /* EXTI1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
-  /* EXTI3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-  /* EXTI9_5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-  /* EXTI4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
-  /* DMA1_Stream2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
-  /* DMA2_Stream1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
-  /* DMA2_Stream7_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
   /* TIM1_UP_TIM10_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
-  /* TIM3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM3_IRQn);
-  /* TIM4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM4_IRQn);
-  /* TIM8_UP_TIM13_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM8_UP_TIM13_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM8_UP_TIM13_IRQn);
-  /* TIM5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM5_IRQn);
-  /* EXTI2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
-  /* DMA1_Stream0_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
-  /* DMA1_Stream7_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream7_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream7_IRQn);
+  /* EXTI0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  /* EXTI9_5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
 /* TIM1 init function */
@@ -636,9 +661,9 @@ static void MX_TIM1_Init(void)
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
 
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = OUT_TIM_BASE_PRESCALER;
+  htim1.Init.Prescaler = OUT_TIM_PRESC;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = OUT_TIM_BASE_PERIOD;
+  htim1.Init.Period = OUT_TIM_PERIOD;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
@@ -666,12 +691,18 @@ static void MX_TIM1_Init(void)
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
   sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_SET;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sConfigOC.Pulse = DIR_SETUP_TIME_US;
+  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -692,6 +723,60 @@ static void MX_TIM1_Init(void)
 
 }
 
+/* TIM2 init function */
+static void MX_TIM2_Init(void)
+{
+
+  TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
+  TIM_OC_InitTypeDef sConfigOC;
+
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 0;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
 /* TIM3 init function */
 static void MX_TIM3_Init(void)
 {
@@ -701,9 +786,9 @@ static void MX_TIM3_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
+  htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = OUT_TIM_BASE_PERIOD;
+  htim3.Init.Period = 0;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
   {
@@ -721,18 +806,23 @@ static void MX_TIM3_Init(void)
     Error_Handler();
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
 
-  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -750,9 +840,9 @@ static void MX_TIM4_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim4.Instance = TIM4;
-  htim4.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
+  htim4.Init.Prescaler = 0;
   htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = OUT_TIM_BASE_PERIOD;
+  htim4.Init.Period = 0;
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
   {
@@ -770,18 +860,23 @@ static void MX_TIM4_Init(void)
     Error_Handler();
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
 
-  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -799,9 +894,9 @@ static void MX_TIM5_Init(void)
   TIM_OC_InitTypeDef sConfigOC;
 
   htim5.Instance = TIM5;
-  htim5.Init.Prescaler = (OUT_TIM_BASE_PRESCALER/2);
+  htim5.Init.Prescaler = 0;
   htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim5.Init.Period = OUT_TIM_BASE_PERIOD;
+  htim5.Init.Period = 0;
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
   {
@@ -819,88 +914,28 @@ static void MX_TIM5_Init(void)
     Error_Handler();
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
 
-  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_OC_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
 
   HAL_TIM_MspPostInit(&htim5);
-
-}
-
-/* TIM8 init function */
-static void MX_TIM8_Init(void)
-{
-
-  TIM_ClockConfigTypeDef sClockSourceConfig;
-  TIM_MasterConfigTypeDef sMasterConfig;
-  TIM_OC_InitTypeDef sConfigOC;
-  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig;
-
-  htim8.Instance = TIM8;
-  htim8.Init.Prescaler = OUT_TIM_BASE_PRESCALER;
-  htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim8.Init.Period = OUT_TIM_BASE_PERIOD;
-  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim8.Init.RepetitionCounter = 0;
-  if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  if (HAL_TIM_OC_Init(&htim8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0xFFFF;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_SET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_OC_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
-  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
-  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 0;
-  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
-  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-  if (HAL_TIMEx_ConfigBreakDeadTime(&htim8, &sBreakDeadTimeConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  HAL_TIM_MspPostInit(&htim8);
 
 }
 
@@ -911,7 +946,11 @@ static void MX_DMA_Init(void)
 {
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
-  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
@@ -929,59 +968,29 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, AXIS1_DIR_OUTPUT_Pin|AXIS2_DIR_OUTPUT_Pin|AXIS3_DIR_OUTPUT_Pin|AXIS5_DIR_OUTPUT_Pin 
-                          |AXIS4_DIR_OUTPUT_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : AXIS4_STEP_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS4_STEP_INPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(AXIS4_STEP_INPUT_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : AXIS5_STEP_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS5_STEP_INPUT_Pin;
+  /*Configure GPIO pins : PD8 PD9 PD1 PD2 
+                           PD3 PD4 PD6 PD7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_1|GPIO_PIN_2 
+                          |GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(AXIS5_STEP_INPUT_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : AXIS1_DIR_INPUT_Pin AXIS4_DIR_INPUT_Pin AXIS5_DIR_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS1_DIR_INPUT_Pin|AXIS4_DIR_INPUT_Pin|AXIS5_DIR_INPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : AXIS1_STEP_INPUT_Pin AXIS2_STEP_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS1_STEP_INPUT_Pin|AXIS2_STEP_INPUT_Pin;
+  /*Configure GPIO pin : AXIS1_STEP_INPUT_Pin */
+  GPIO_InitStruct.Pin = AXIS1_STEP_INPUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(AXIS1_STEP_INPUT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : AXIS1_DIR_OUTPUT_Pin AXIS2_DIR_OUTPUT_Pin AXIS3_DIR_OUTPUT_Pin AXIS5_DIR_OUTPUT_Pin 
-                           AXIS4_DIR_OUTPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS1_DIR_OUTPUT_Pin|AXIS2_DIR_OUTPUT_Pin|AXIS3_DIR_OUTPUT_Pin|AXIS5_DIR_OUTPUT_Pin 
-                          |AXIS4_DIR_OUTPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : AXIS2_DIR_INPUT_Pin AXIS3_DIR_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS2_DIR_INPUT_Pin|AXIS3_DIR_INPUT_Pin;
+  /*Configure GPIO pin : AXIS1_DIR_INPUT_Pin */
+  GPIO_InitStruct.Pin = AXIS1_DIR_INPUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : AXIS3_STEP_INPUT_Pin */
-  GPIO_InitStruct.Pin = AXIS3_STEP_INPUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(AXIS3_STEP_INPUT_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(AXIS1_DIR_INPUT_GPIO_Port, &GPIO_InitStruct);
 
 }
 
