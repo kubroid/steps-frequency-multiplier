@@ -54,6 +54,10 @@ DMA_HandleTypeDef hdma_tim1_ch3;
 #define OUT_STEP_MULT       10    // steps frequency multiplier = 1..100
 #define MAX_INPUT_FREQ      50    // KHz, max input steps frequency
 
+#define DIR_HOLD_TIME       50    // us, delay before DIR change
+#define DIR_SETUP_TIME      50    // us, delay after DIR change
+
+
 
 
 
@@ -87,6 +91,13 @@ static const uint32_t auwTimSourceFreq[] = { // source frequencies of the timers
      84000000,  // axis 3
      84000000   // axis 4
 };
+static const uint32_t auqAxisTimDirPresc[] = { // prescalers for the DIR outputs
+    168-1,  // axis 0
+     84-1,  // axis 1
+     84-1,  // axis 2
+     84-1,  // axis 3
+     84-1   // axis 4
+};
 
 
 
@@ -116,7 +127,7 @@ volatile uint16_t auhSteps[AXIS_CNT] = {0};
 
 // SERVO CYCLE
 volatile uint64_t ulTime = 0;
-volatile uint64_t ulTimePrev = 0;
+volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
 
 
 
@@ -216,7 +227,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void static inline setup_OC_DMA_array()
 {
   // auhOCDMAVal = {0,1,2,3,4,...}
-  for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal[i] = i;
+  for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal[i] = i+1;
 }
 
 // set axis output pins same as inputs
@@ -233,32 +244,15 @@ void static inline setup_out_pins()
   }
 }
 
-#if 0
-// start all out timers
-void static inline start_out_timers()
+// setup output timers data
+void static inline setup_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    // set startup prescaler
-    __HAL_TIM_SET_PRESCALER(aAxisTim[axis], STARTUP_PERIOD);
-
-    /* Enable the TIM Update interrupt */
-    __HAL_TIM_ENABLE_IT(aAxisTim[axis], TIM_IT_UPDATE);
-
-    /* Enable the main output */
-    if(IS_TIM_ADVANCED_INSTANCE(aAxisTim[axis]->Instance) != RESET)
-    {
-      __HAL_TIM_MOE_ENABLE(aAxisTim[axis]);
-    }
-
-    /* Enable the Peripheral */
-    __HAL_TIM_ENABLE(aAxisTim[axis]);
-
-    /* Enable the Output compare channel */
-    TIM_CCxChannelCmd(aAxisTim[axis]->Instance, auwAxisTimCh[axis], TIM_CCx_ENABLE);
+    // set output DIR setup time
+    __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimDirCh[axis], DIR_SETUP_TIME);
   }
 }
-#endif
 
 // setup US counter data
 void static inline setup_counter()
@@ -319,159 +313,69 @@ void update_out_timers_presc()
 }
 #endif
 
-
-#if 0
-/**
-  * @brief  Starts the TIM Output Compare signal generation in DMA mode.
-  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
-  *                the configuration information for TIM module.
-  * @param  Channel: TIM Channel to be enabled.
-  *          This parameter can be one of the following values:
-  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
-  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
-  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
-  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
-  * @param  pData: The source Buffer address.
-  * @param  Length: The length of data to be transferred from memory to TIM peripheral
-  * @retval HAL status
-  */
-HAL_StatusTypeDef TIM_OC_Start_DMA(TIM_HandleTypeDef *htim, uint32_t Channel, uint32_t *pData, uint16_t Length)
-{
-  htim->State = HAL_TIM_STATE_BUSY;
-
-  switch (Channel)
-  {
-    case TIM_CHANNEL_1:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC1], (uint32_t)pData, (uint32_t)&htim->Instance->CCR1, Length);
-
-      /* Enable the TIM Capture/Compare 1 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC1);
-    }
-    break;
-
-    case TIM_CHANNEL_2:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC2], (uint32_t)pData, (uint32_t)&htim->Instance->CCR2, Length);
-
-      /* Enable the TIM Capture/Compare 2 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC2);
-    }
-    break;
-
-    case TIM_CHANNEL_3:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC3], (uint32_t)pData, (uint32_t)&htim->Instance->CCR3,Length);
-
-      /* Enable the TIM Capture/Compare 3 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC3);
-    }
-    break;
-
-    case TIM_CHANNEL_4:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC4], (uint32_t)pData, (uint32_t)&htim->Instance->CCR4, Length);
-
-      /* Enable the TIM Capture/Compare 4 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC4);
-    }
-    break;
-  }
-
-  /* Return function status */
-  return HAL_OK;
-}
-#endif
-
-#if 0
-/**
-  * @brief  Stops the TIM Output Compare signal generation in DMA mode.
-  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
-  *                the configuration information for TIM module.
-  * @param  Channel: TIM Channel to be disabled.
-  *          This parameter can be one of the following values:
-  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
-  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
-  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
-  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
-  * @retval HAL status
-  */
-HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
-{
-  switch (Channel)
-  {
-    case TIM_CHANNEL_1:
-    {
-      /* Disable the TIM Capture/Compare 1 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC1);
-    }
-    break;
-
-    case TIM_CHANNEL_2:
-    {
-      /* Disable the TIM Capture/Compare 2 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC2);
-    }
-    break;
-
-    case TIM_CHANNEL_3:
-    {
-      /* Disable the TIM Capture/Compare 3 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC3);
-    }
-    break;
-
-    case TIM_CHANNEL_4:
-    {
-      /* Disable the TIM Capture/Compare 4 interrupt */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC4);
-    }
-    break;
-
-    default:
-    break;
-  }
-
-  /* Change the htim state */
-  htim->State = HAL_TIM_STATE_READY;
-
-  /* Return function status */
-  return HAL_OK;
-}
-#endif
-
-#if 0
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
-  auqOutputOn[axis] = 1;
-  __HAL_TIM_SET_COUNTER(aAxisTim[axis], 0);
-  __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
-  TIM_OC_Start_DMA(aAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
-}
-#endif
+  static uint32_t ticks = 0;
 
-#if 0
+  // if we have anything to output
+  if ( aBuf[axis][auqBufOutPos[axis]].hCount )
+  {
+    __HAL_TIM_SET_COUNTER(aAxisTim[axis], 0);
+
+    // if we have steps to output
+    if ( aBuf[axis][auqBufOutPos[axis]].hCount > 0 )
+    {
+      ticks = aBuf[axis][auqBufOutPos[axis]].hCount * OUT_STEP_MULT * 2;
+
+      __HAL_TIM_SET_PRESCALER( aAxisTim[axis],
+        auwTimSourceFreq[axis] / (ticks * aBuf[axis][auqBufOutPos[axis]].uhTime)
+      );
+      __HAL_TIM_SET_AUTORELOAD(aAxisTim[axis], ticks);
+      __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimStepCh[axis], 0);
+
+      HAL_TIM_OC_Start_DMA(aAxisTim[axis], auwAxisTimStepCh[axis], (uint32_t*)auhOCDMAVal, DMA_ARRAY_SIZE);
+
+      // turn on step output flag
+      auqOutputOn[axis] = 1;
+    }
+    // if we have DIR change
+    else
+    {
+      __HAL_TIM_SET_PRESCALER( aAxisTim[axis], auqAxisTimDirPresc[axis] );
+      __HAL_TIM_SET_AUTORELOAD(aAxisTim[axis], DIR_HOLD_TIME + DIR_SETUP_TIME);
+
+      HAL_TIM_OC_Start_IT(aAxisTim[axis], auwAxisTimStepCh[axis]);
+
+      // turn on DIR output flag
+      auqOutputOn[axis] = 2;
+    }
+  }
+}
+
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
-  TIM_OC_Stop_DMA(aAxisTim[axis], auwAxisTimCh[axis]);
-  auqOutputOn[axis] = 0;
-}
-#endif
+  if ( auqOutputOn[axis] )
+  {
+    if ( auqOutputOn[axis] == 1 )
+    {
+      HAL_TIM_OC_Stop_DMA(aAxisTim[axis], auwAxisTimStepCh[axis]);
+    }
+    else
+    {
+      HAL_TIM_OC_Stop_IT(aAxisTim[axis], auwAxisTimDirCh[axis]);
+    }
 
-#if 0
+    auqOutputOn[axis] = 0;
+  }
+}
+
 // get output enabled flag
 uint8_t static inline output(uint8_t axis)
 {
   return auqOutputOn[axis];
 }
-#endif
 
 
 
@@ -480,18 +384,32 @@ uint8_t static inline output(uint8_t axis)
 void process_servo_cycle()
 {
   static uint8_t axis = 0;
+  static uint64_t ulTime = 0;
 
+  // get current time
   ulTime = time_us();
-
-  // TODO - process servo cycle
-  // ...
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    auhSteps[axis] = 0;
-  }
+    // if we have any input steps
+    if ( auhSteps[axis] )
+    {
+      // add them to the out buffer
+      aBuf[axis][auqBufAddPos[axis]].hCount = auhSteps[axis];
+      aBuf[axis][auqBufAddPos[axis]].uhTime = ulTime - aulTimePrev[axis];
 
-  ulTimePrev = ulTime;
+      // goto next buff pos
+      ++auqBufAddPos[axis];
+
+      // reset steps count
+      auhSteps[axis] = 0;
+
+      if ( !output(axis) ) start_output(axis);
+    }
+
+    // save current time for all axes
+    aulTimePrev[axis] = ulTime;
+  }
 }
 
 // on EXTI 4-0 input
@@ -505,6 +423,10 @@ void process_input_step(uint8_t axis)
 void process_input_dirs()
 {
   static uint8_t axis = 0;
+  static uint64_t ulTime = 0;
+
+  // get current time
+  ulTime = time_us();
 
   for ( axis = AXIS_CNT; axis--; )
   {
@@ -512,8 +434,28 @@ void process_input_dirs()
     {
       __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
 
-      // TODO - process input DIRs
-      // ...
+      // if we have any input steps before DIR change
+      if ( auhSteps[axis] )
+      {
+        // add them to the out buffer
+        aBuf[axis][auqBufAddPos[axis]].hCount = auhSteps[axis];
+        aBuf[axis][auqBufAddPos[axis]].uhTime = ulTime - aulTimePrev[axis];
+        // goto next buff pos
+        ++auqBufAddPos[axis];
+
+        // reset steps count
+        auhSteps[axis] = 0;
+      }
+
+      // save current time for this axis
+      aulTimePrev[axis] = ulTime;
+
+      // add DIR change to the out buffer
+      aBuf[axis][auqBufAddPos[axis]].hCount = -1;
+      // goto next buff pos
+      ++auqBufAddPos[axis];
+
+      if ( !output(axis) ) start_output(axis);
     }
   }
 }
@@ -521,15 +463,23 @@ void process_input_dirs()
 // on axis TIM update
 void on_axis_tim_update(uint8_t axis)
 {
-  /* TIM Update event */
   if ( __HAL_TIM_GET_FLAG(aAxisTim[axis], TIM_FLAG_UPDATE) )
   {
     if ( __HAL_TIM_GET_IT_SOURCE(aAxisTim[axis], TIM_IT_UPDATE) )
     {
       __HAL_TIM_CLEAR_IT(aAxisTim[axis], TIM_IT_UPDATE);
 
-      // TODO - process output
-      // ...
+      // if we have output enabled
+      if ( output(axis) )
+      {
+        stop_output(axis);
+
+        // goto next buf pos
+        ++auqBufOutPos[axis];
+      }
+
+      // if we have something to output
+      if ( aBuf[axis][auqBufOutPos[axis]].hCount ) start_output(axis);
     }
   }
 }
@@ -566,6 +516,7 @@ int main(void)
   setup_counter();
   setup_OC_DMA_array();
   setup_out_pins();
+  setup_out_timers();
   /* USER CODE END 2 */
 
   /* Infinite loop */
