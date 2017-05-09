@@ -84,20 +84,21 @@ static const uint32_t auwAxisTimDirCh[] = { // list of DIR output channels
     TIM_CHANNEL_2,  // axis 3
     TIM_CHANNEL_4   // axis 4
 };
-static const uint32_t auwTimSourceFreq[] = { // source frequencies of the timers
-    168000000,  // axis 0
-     84000000,  // axis 1
-     84000000,  // axis 2
-     84000000,  // axis 3
-     84000000   // axis 4
+static const uint8_t auqTimSourceFreqMHz[] = { // source frequencies of the timers
+    168,  // axis 0
+     84,  // axis 1
+     84,  // axis 2
+     84,  // axis 3
+     84   // axis 4
 };
-static const uint32_t auqAxisTimDirPresc[] = { // prescalers for the DIR outputs
+static const uint8_t auqAxisTimDirPresc[] = { // prescalers for the DIR outputs
     168-1,  // axis 0
      84-1,  // axis 1
      84-1,  // axis 2
      84-1,  // axis 3
      84-1   // axis 4
 };
+
 
 
 
@@ -121,7 +122,9 @@ volatile uint8_t auqBufOutPos[AXIS_CNT] = {0};
 
 // INPUT STEPS
 volatile uint16_t auhSteps[AXIS_CNT] = {0};
-
+#if 0
+volatile uint16_t auhStepsMax[AXIS_CNT] = {0};
+#endif
 
 
 
@@ -132,8 +135,10 @@ volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
 
 
 
-// OUTPUT STATE
+// OUTPUT
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
+volatile uint16_t auhTimPresc[AXIS_CNT] = {0};
+volatile uint16_t auhTimPeriod[AXIS_CNT] = {0};
 
 
 
@@ -230,25 +235,13 @@ void static inline setup_OC_DMA_array()
   for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal[i] = i+1;
 }
 
-// set axis output pins same as inputs
-void static inline setup_out_pins()
-{
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    HAL_GPIO_WritePin( aAxisStepOutputs[axis].PORT, aAxisStepOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(aAxisStepInputs[axis].PORT, aAxisStepInputs[axis].PIN)
-    );
-    HAL_GPIO_WritePin( aAxisDirOutputs[axis].PORT, aAxisDirOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(aAxisDirInputs[axis].PORT, aAxisDirInputs[axis].PIN)
-    );
-  }
-}
-
 // setup output timers data
 void static inline setup_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
+    // enable Update event
+    __HAL_TIM_ENABLE_IT(aAxisTim[axis], TIM_IT_UPDATE);
     // set output DIR setup time
     __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimDirCh[axis], DIR_SETUP_TIME);
   }
@@ -273,68 +266,41 @@ uint64_t static inline time_us()
 
 
 
-#if 0
-// update prescallers for the active output timers
-// every 1000us (on systick event)
-void update_out_timers_presc()
-{
-  static uint8_t axis = 0;
-  static uint32_t uwPrescCur = 0;
-
-  for ( axis = AXIS_CNT; axis--; )
-  {
-    if ( auwSteps[axis] )
-    {
-      // calculate input period
-      auwPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
-      // check input period
-      if ( auwPeriod[axis] < MAX_PERIOD )
-      {
-        // period is correct
-      }
-      else if ( auwPeriod[axis] < MAX_PERIOD*MAX_PERIOD_MULT )
-      {
-        auwPeriod[axis] = MAX_PERIOD;
-      }
-      else
-      {
-        auwPeriod[axis] = STARTUP_PERIOD;
-      }
-
-      // calculate the new prescaler
-      uwPrescCur = auwPeriod[axis] / auqPrescDiv[axis];
-      // correcting new prescaler
-      if ( auwSteps[axis] < 100 ) uwPrescCur = uwPrescCur * (100 - auwSteps[axis]) / 100;
-      else uwPrescCur = 0;
-      // set new prescaler
-      __HAL_TIM_SET_PRESCALER(aAxisTim[axis], uwPrescCur);
-    }
-  }
-}
-#endif
 
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
-  static uint32_t ticks = 0;
-
   // if we have anything to output
   if ( aBuf[axis][auqBufOutPos[axis]].hCount )
   {
-    __HAL_TIM_SET_COUNTER(aAxisTim[axis], 0);
-
     // if we have steps to output
     if ( aBuf[axis][auqBufOutPos[axis]].hCount > 0 )
     {
-      ticks = aBuf[axis][auqBufOutPos[axis]].hCount * OUT_STEP_MULT * 2;
+      // calculate timer's new period
+      auhTimPeriod[axis] = aBuf[axis][auqBufOutPos[axis]].hCount
+        * (OUT_STEP_MULT * 2)
+        - 1;
 
-      __HAL_TIM_SET_PRESCALER( aAxisTim[axis],
-        auwTimSourceFreq[axis] / (ticks * aBuf[axis][auqBufOutPos[axis]].uhTime)
+      // calculate timer's new prescaler
+      auhTimPresc[axis] = auqTimSourceFreqMHz[axis]
+        * aBuf[axis][auqBufOutPos[axis]].uhTime
+        / (auhTimPeriod[axis] + 1)
+        - 1;
+
+      // update prescaler, period, compare value
+      __HAL_TIM_SET_PRESCALER(aAxisTim[axis], auhTimPresc[axis]);
+      __HAL_TIM_SET_AUTORELOAD(aAxisTim[axis], auhTimPeriod[axis]);
+      __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimStepCh[axis], auhOCDMAVal[0]);
+
+      // generate an update event to reload the Prescaler
+      aAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
+      aAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
+
+      // start timer's channel in OC+DMA mode
+      HAL_TIM_OC_Start_DMA(
+          aAxisTim[axis], auwAxisTimStepCh[axis],
+          ((uint32_t*)&auhOCDMAVal[1]), auhTimPeriod[axis] - 1
       );
-      __HAL_TIM_SET_AUTORELOAD(aAxisTim[axis], ticks);
-      __HAL_TIM_SET_COMPARE(aAxisTim[axis], auwAxisTimStepCh[axis], 0);
-
-      HAL_TIM_OC_Start_DMA(aAxisTim[axis], auwAxisTimStepCh[axis], (uint32_t*)auhOCDMAVal, DMA_ARRAY_SIZE);
 
       // turn on step output flag
       auqOutputOn[axis] = 1;
@@ -342,9 +308,15 @@ void static inline start_output(uint8_t axis)
     // if we have DIR change
     else
     {
+      // update prescaler, period
       __HAL_TIM_SET_PRESCALER( aAxisTim[axis], auqAxisTimDirPresc[axis] );
       __HAL_TIM_SET_AUTORELOAD(aAxisTim[axis], DIR_HOLD_TIME + DIR_SETUP_TIME);
 
+      // generate an update event to reload the Prescaler
+      aAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
+      aAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
+
+      // start timer's channel in OC mode
       HAL_TIM_OC_Start_IT(aAxisTim[axis], auwAxisTimStepCh[axis]);
 
       // turn on DIR output flag
@@ -356,17 +328,23 @@ void static inline start_output(uint8_t axis)
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
+  // if output is enabled
   if ( auqOutputOn[axis] )
   {
+    // if it was a step output
     if ( auqOutputOn[axis] == 1 )
     {
+      // stop timer's channel in OC+DMA mode
       HAL_TIM_OC_Stop_DMA(aAxisTim[axis], auwAxisTimStepCh[axis]);
     }
+    // if it was a DIR output
     else
     {
+      // stop timer's channel in OC mode
       HAL_TIM_OC_Stop_IT(aAxisTim[axis], auwAxisTimDirCh[axis]);
     }
 
+    // turn off output flag
     auqOutputOn[axis] = 0;
   }
 }
@@ -386,6 +364,18 @@ void process_servo_cycle()
   static uint8_t axis = 0;
   static uint64_t ulTime = 0;
 
+#if 0
+  // TODO - it's test code
+  if ( !(HAL_GetTick() % 1000) )
+  {
+    aBuf[0][auqBufAddPos[0]].hCount = 1;
+    aBuf[0][auqBufAddPos[0]].uhTime = 5000;
+    ++auqBufAddPos[0];
+
+    if ( !output(0) ) start_output(0);
+  }
+#endif
+#if 1
   // get current time
   ulTime = time_us();
 
@@ -410,6 +400,7 @@ void process_servo_cycle()
     // save current time for all axes
     aulTimePrev[axis] = ulTime;
   }
+#endif
 }
 
 // on EXTI 4-0 input
@@ -434,6 +425,7 @@ void process_input_dirs()
     {
       __HAL_GPIO_EXTI_CLEAR_IT(aAxisDirInputs[axis].PIN);
 
+#if 0
       // if we have any input steps before DIR change
       if ( auhSteps[axis] )
       {
@@ -456,6 +448,7 @@ void process_input_dirs()
       ++auqBufAddPos[axis];
 
       if ( !output(axis) ) start_output(axis);
+#endif
     }
   }
 }
@@ -472,14 +465,15 @@ void on_axis_tim_update(uint8_t axis)
       // if we have output enabled
       if ( output(axis) )
       {
+        // disable output
         stop_output(axis);
-
+        // reset buf pos cell
+        aBuf[axis][auqBufOutPos[axis]].hCount = 0;
         // goto next buf pos
         ++auqBufOutPos[axis];
+        // if we have something else to output - start output
+        if ( aBuf[axis][auqBufOutPos[axis]].hCount ) start_output(axis);
       }
-
-      // if we have something to output
-      if ( aBuf[axis][auqBufOutPos[axis]].hCount ) start_output(axis);
     }
   }
 }
@@ -515,7 +509,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   setup_counter();
   setup_OC_DMA_array();
-  setup_out_pins();
   setup_out_timers();
   /* USER CODE END 2 */
 
@@ -600,6 +593,12 @@ static void MX_NVIC_Init(void)
   /* EXTI9_5_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+  /* TIM1_CC_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(TIM1_CC_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
+  /* DMA2_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 }
 
 /* TIM1 init function */
@@ -897,11 +896,6 @@ static void MX_DMA_Init(void)
 {
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA2_Stream6_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 
 }
 
