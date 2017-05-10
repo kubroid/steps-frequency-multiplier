@@ -93,7 +93,7 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     hdma_tim1_ch3.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
     hdma_tim1_ch3.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
     hdma_tim1_ch3.Init.Mode = DMA_NORMAL;
-    hdma_tim1_ch3.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    hdma_tim1_ch3.Init.Priority = DMA_PRIORITY_LOW;
     hdma_tim1_ch3.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     if (HAL_DMA_Init(&hdma_tim1_ch3) != HAL_OK)
     {
@@ -287,8 +287,6 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
 
     /* Peripheral interrupt DeInit*/
     HAL_NVIC_DisableIRQ(TIM1_UP_TIM10_IRQn);
-
-    HAL_NVIC_DisableIRQ(TIM1_CC_IRQn);
 
   /* USER CODE BEGIN TIM1_MspDeInit 1 */
 
