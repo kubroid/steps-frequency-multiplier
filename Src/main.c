@@ -74,7 +74,9 @@ static const uint32_t auwAxisTimCh[] = {
     TIM_CHANNEL_1,
     TIM_CHANNEL_4
 };
-static uint8_t auqPrescDiv[] = {1,2,2,2,1};
+
+volatile const uint8_t auqPrescDiv[] = {1,2,2,2,1};
+volatile uint16_t auhPresc[AXIS_CNT] = {0};
 
 volatile uint32_t auwSteps[AXIS_CNT] = {0};
 volatile uint8_t auqDirs[AXIS_CNT] = {0};
@@ -186,11 +188,16 @@ void static inline start_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
-    // set startup prescaler
-    __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], STARTUP_PERIOD);
-
     /* Enable the TIM Update interrupt */
     __HAL_TIM_ENABLE_IT(ahAxisTim[axis], TIM_IT_UPDATE);
+
+    // set startup prescaler
+    auhPresc[axis] = STARTUP_PERIOD / auqPrescDiv[axis];
+    __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], auhPresc[axis]);
+
+    // generate an update event to reload the Prescaler
+    ahAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
+    ahAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
 
     /* Enable the main output */
     if(IS_TIM_ADVANCED_INSTANCE(ahAxisTim[axis]->Instance) != RESET)
@@ -230,7 +237,6 @@ uint64_t static inline time_us()
 void update_out_timers_presc()
 {
   static uint8_t axis = 0;
-  static uint32_t uwPrescCur = 0;
 
   for ( axis = AXIS_CNT; axis--; )
   {
@@ -253,12 +259,12 @@ void update_out_timers_presc()
       }
 
       // calculate the new prescaler
-      uwPrescCur = auwPeriod[axis] / auqPrescDiv[axis];
+      auhPresc[axis] = auwPeriod[axis] / auqPrescDiv[axis];
       // correcting new prescaler
-      if ( auwSteps[axis] < 100 ) uwPrescCur = uwPrescCur * (100 - auwSteps[axis]) / 100;
-      else uwPrescCur = 0;
+      if ( auwSteps[axis] < 100 ) auhPresc[axis] = auhPresc[axis] * (100 - auwSteps[axis]) / 100;
+      else auhPresc[axis] = 0;
       // set new prescaler
-      __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], uwPrescCur);
+      __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], auhPresc[axis]);
     }
   }
 }
@@ -387,10 +393,17 @@ HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
-  auqOutputOn[axis] = 1;
+  __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], auhPresc[axis]);
   __HAL_TIM_SET_COUNTER(ahAxisTim[axis], 0);
   __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
+
+  // generate an update event to reload the Prescaler
+  ahAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
+  ahAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
+
   TIM_OC_Start_DMA(ahAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
+
+  auqOutputOn[axis] = 1;
 }
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
