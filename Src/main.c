@@ -240,7 +240,7 @@ void update_out_timers_presc()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( auwSteps[axis] )
+    if ( aulTime[axis] )
     {
       // calculate input period
       auwPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
