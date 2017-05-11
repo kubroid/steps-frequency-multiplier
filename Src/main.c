@@ -409,7 +409,6 @@ HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
 void static inline start_output(uint8_t axis)
 {
   __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], auhPresc[axis]);
-  __HAL_TIM_SET_COUNTER(ahAxisTim[axis], 0);
   __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], auwOCDMAVal[0]);
 
   // generate an update event to reload the Prescaler
