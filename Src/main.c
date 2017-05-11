@@ -275,10 +275,11 @@ void update_out_timers_presc()
       // calculate the new prescaler
       auhPresc[axis] = (uint16_t)aulPeriod[axis] / (uint16_t)auqPrescDiv[axis];
       // correcting new prescaler
-      if ( auwSteps[axis] < 100 ) auhPresc[axis] = auhPresc[axis] * (100 - auwSteps[axis]) / 100;
-      else auhPresc[axis] = 0;
-      // set new prescaler
-      __HAL_TIM_SET_PRESCALER(ahAxisTim[axis], auhPresc[axis]);
+      if ( auwSteps[axis] )
+      {
+        if ( auwSteps[axis] < 100 ) auhPresc[axis] = auhPresc[axis] * (100 - auwSteps[axis]) / 100;
+        else auhPresc[axis] = 0;
+      }
     }
   }
 }
