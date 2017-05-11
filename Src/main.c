@@ -247,11 +247,15 @@ uint64_t static inline time_us()
 void update_out_timers_presc()
 {
   static uint8_t axis = 0;
+  static uint32_t ulLastCalcTime[AXIS_CNT] = {0};
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( aulTime[axis] )
+    if ( aulTime[axis] != ulLastCalcTime[axis] )
     {
+      // save calculation time for the next check
+      ulLastCalcTime[axis] = aulTime[axis];
+
       // calculate input period
       aulPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
       // check input period
