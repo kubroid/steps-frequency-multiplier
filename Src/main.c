@@ -80,7 +80,7 @@ volatile uint16_t auhPresc[AXIS_CNT] = {0};
 
 volatile uint32_t auwSteps[AXIS_CNT] = {0};
 volatile uint8_t auqDirs[AXIS_CNT] = {0};
-volatile uint32_t auwPeriod[AXIS_CNT] = {0};
+volatile uint64_t aulPeriod[AXIS_CNT] = {0};
 volatile uint64_t aulTime[AXIS_CNT] = {0};
 volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
@@ -253,23 +253,23 @@ void update_out_timers_presc()
     if ( aulTime[axis] )
     {
       // calculate input period
-      auwPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
+      aulPeriod[axis] = aulTime[axis] - aulTimePrev[axis];
       // check input period
-      if ( auwPeriod[axis] < MAX_PERIOD )
+      if ( aulPeriod[axis] < MAX_PERIOD )
       {
         // period is correct
       }
-      else if ( auwPeriod[axis] < MAX_PERIOD*MAX_PERIOD_MULT )
+      else if ( aulPeriod[axis] < MAX_PERIOD*MAX_PERIOD_MULT )
       {
-        auwPeriod[axis] = MAX_PERIOD;
+        aulPeriod[axis] = MAX_PERIOD;
       }
       else
       {
-        auwPeriod[axis] = STARTUP_PERIOD;
+        aulPeriod[axis] = STARTUP_PERIOD;
       }
 
       // calculate the new prescaler
-      auhPresc[axis] = auwPeriod[axis] / auqPrescDiv[axis];
+      auhPresc[axis] = (uint16_t)aulPeriod[axis] / (uint16_t)auqPrescDiv[axis];
       // correcting new prescaler
       if ( auwSteps[axis] < 100 ) auhPresc[axis] = auhPresc[axis] * (100 - auwSteps[axis]) / 100;
       else auhPresc[axis] = 0;
