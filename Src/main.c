@@ -85,6 +85,7 @@ volatile uint64_t aulTime[AXIS_CNT] = {0};
 volatile uint64_t aulTimePrev[AXIS_CNT] = {0};
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 
+extern volatile uint32_t uwTick;
 volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
@@ -226,7 +227,16 @@ void static inline setup_counter()
 // value is overloaded after 49.71 days (256*256*256*256 ms)
 uint64_t static inline time_us()
 {
-  return HAL_GetTick()*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
+  static uint32_t tick[2] = {0};
+  static uint32_t updates = 0;
+
+  tick[0] = SysTick->VAL;
+  updates = uwTick;
+  tick[1] = SysTick->VAL;
+
+  return tick[1] > tick[0] ?
+     uwTick*1000 + (uwSysTickClk - tick[1])/uwSysTimeDivUS :
+    updates*1000 + (uwSysTickClk - tick[0])/uwSysTimeDivUS ;
 }
 
 
