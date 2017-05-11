@@ -185,7 +185,7 @@ void static inline setup_out_DIR_pins()
   }
 }
 // start all out timers
-void static inline start_out_timers()
+void static inline setup_out_timers()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
@@ -199,18 +199,6 @@ void static inline start_out_timers()
     // generate an update event to reload the Prescaler
     ahAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
     ahAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
-
-    /* Enable the main output */
-    if(IS_TIM_ADVANCED_INSTANCE(ahAxisTim[axis]->Instance) != RESET)
-    {
-      __HAL_TIM_MOE_ENABLE(ahAxisTim[axis]);
-    }
-
-    /* Enable the Peripheral */
-    __HAL_TIM_ENABLE(ahAxisTim[axis]);
-
-    /* Enable the Output compare channel */
-    TIM_CCxChannelCmd(ahAxisTim[axis]->Instance, auwAxisTimCh[axis], TIM_CCx_ENABLE);
   }
 }
 // setup US counter data
@@ -287,124 +275,6 @@ void update_out_timers_presc()
 
 
 
-/**
-  * @brief  Starts the TIM Output Compare signal generation in DMA mode.
-  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
-  *                the configuration information for TIM module.
-  * @param  Channel: TIM Channel to be enabled.
-  *          This parameter can be one of the following values:
-  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
-  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
-  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
-  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
-  * @param  pData: The source Buffer address.
-  * @param  Length: The length of data to be transferred from memory to TIM peripheral
-  * @retval HAL status
-  */
-HAL_StatusTypeDef TIM_OC_Start_DMA(TIM_HandleTypeDef *htim, uint32_t Channel, uint32_t *pData, uint16_t Length)
-{
-  htim->State = HAL_TIM_STATE_BUSY;
-
-  switch (Channel)
-  {
-    case TIM_CHANNEL_1:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC1], (uint32_t)pData, (uint32_t)&htim->Instance->CCR1, Length);
-
-      /* Enable the TIM Capture/Compare 1 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC1);
-    }
-    break;
-
-    case TIM_CHANNEL_2:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC2], (uint32_t)pData, (uint32_t)&htim->Instance->CCR2, Length);
-
-      /* Enable the TIM Capture/Compare 2 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC2);
-    }
-    break;
-
-    case TIM_CHANNEL_3:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC3], (uint32_t)pData, (uint32_t)&htim->Instance->CCR3,Length);
-
-      /* Enable the TIM Capture/Compare 3 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC3);
-    }
-    break;
-
-    case TIM_CHANNEL_4:
-    {
-      /* Enable the DMA Stream */
-      HAL_DMA_Start_IT(htim->hdma[TIM_DMA_ID_CC4], (uint32_t)pData, (uint32_t)&htim->Instance->CCR4, Length);
-
-      /* Enable the TIM Capture/Compare 4 DMA request */
-      __HAL_TIM_ENABLE_DMA(htim, TIM_DMA_CC4);
-    }
-    break;
-  }
-
-  /* Return function status */
-  return HAL_OK;
-}
-/**
-  * @brief  Stops the TIM Output Compare signal generation in DMA mode.
-  * @param  htim: pointer to a TIM_HandleTypeDef structure that contains
-  *                the configuration information for TIM module.
-  * @param  Channel: TIM Channel to be disabled.
-  *          This parameter can be one of the following values:
-  *            @arg TIM_CHANNEL_1: TIM Channel 1 selected
-  *            @arg TIM_CHANNEL_2: TIM Channel 2 selected
-  *            @arg TIM_CHANNEL_3: TIM Channel 3 selected
-  *            @arg TIM_CHANNEL_4: TIM Channel 4 selected
-  * @retval HAL status
-  */
-HAL_StatusTypeDef TIM_OC_Stop_DMA(TIM_HandleTypeDef *htim, uint32_t Channel)
-{
-  switch (Channel)
-  {
-    case TIM_CHANNEL_1:
-    {
-      /* Disable the TIM Capture/Compare 1 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC1);
-    }
-    break;
-
-    case TIM_CHANNEL_2:
-    {
-      /* Disable the TIM Capture/Compare 2 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC2);
-    }
-    break;
-
-    case TIM_CHANNEL_3:
-    {
-      /* Disable the TIM Capture/Compare 3 DMA request */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC3);
-    }
-    break;
-
-    case TIM_CHANNEL_4:
-    {
-      /* Disable the TIM Capture/Compare 4 interrupt */
-      __HAL_TIM_DISABLE_DMA(htim, TIM_DMA_CC4);
-    }
-    break;
-
-    default:
-    break;
-  }
-
-  /* Change the htim state */
-  htim->State = HAL_TIM_STATE_READY;
-
-  /* Return function status */
-  return HAL_OK;
-}
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
@@ -415,15 +285,14 @@ void static inline start_output(uint8_t axis)
   ahAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
   ahAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
 
-  TIM_OC_Start_DMA(ahAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
+  HAL_TIM_OC_Start_DMA(ahAxisTim[axis], auwAxisTimCh[axis], &auwOCDMAVal[1], (OUT_STEP_MULT*2 - 1));
 
   auqOutputOn[axis] = 1;
 }
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
-  TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
+  HAL_TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
   auqOutputOn[axis] = 0;
 }
 // get output enabled flag
@@ -528,7 +397,7 @@ int main(void)
   setup_counter();
   setup_OC_DMA_array();
   setup_out_DIR_pins();
-  start_out_timers();
+  setup_out_timers();
   /* USER CODE END 2 */
 
   /* Infinite loop */
