@@ -38,7 +38,7 @@
 /* USER CODE BEGIN 0 */
 void process_input_step(uint8_t axis);
 void process_input_dirs();
-void update_out_timers_presc();
+void process_sys_tick();
 void on_axis_tim_update(uint8_t axis);
 /* USER CODE END 0 */
 
@@ -159,7 +159,7 @@ void SysTick_Handler(void)
   HAL_IncTick();
   HAL_SYSTICK_IRQHandler();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-  update_out_timers_presc();
+  process_sys_tick();
   /* USER CODE END SysTick_IRQn 1 */
 }
 
