@@ -3,6 +3,11 @@
   * File Name          : main.h
   * Description        : This file contains the common defines of the application
   ******************************************************************************
+  ** This notice applies to any and all portions of this file
+  * that are not between comment pairs USER CODE BEGIN and
+  * USER CODE END. Other portions of this file, whether 
+  * inserted by the user or by software development tools
+  * are owned by their respective copyright owners.
   *
   * COPYRIGHT(c) 2017 STMicroelectronics
   *
@@ -47,14 +52,19 @@
 #define AXIS4_STEP_OUTPUT_GPIO_Port GPIOA
 #define AXIS4_STEP_INPUT_Pin GPIO_PIN_3
 #define AXIS4_STEP_INPUT_GPIO_Port GPIOA
+#define AXIS4_STEP_INPUT_EXTI_IRQn EXTI3_IRQn
 #define AXIS5_STEP_INPUT_Pin GPIO_PIN_4
 #define AXIS5_STEP_INPUT_GPIO_Port GPIOA
+#define AXIS5_STEP_INPUT_EXTI_IRQn EXTI4_IRQn
 #define AXIS1_DIR_INPUT_Pin GPIO_PIN_5
 #define AXIS1_DIR_INPUT_GPIO_Port GPIOA
+#define AXIS1_DIR_INPUT_EXTI_IRQn EXTI9_5_IRQn
 #define AXIS1_STEP_INPUT_Pin GPIO_PIN_0
 #define AXIS1_STEP_INPUT_GPIO_Port GPIOB
+#define AXIS1_STEP_INPUT_EXTI_IRQn EXTI0_IRQn
 #define AXIS2_STEP_INPUT_Pin GPIO_PIN_1
 #define AXIS2_STEP_INPUT_GPIO_Port GPIOB
+#define AXIS2_STEP_INPUT_EXTI_IRQn EXTI1_IRQn
 #define AXIS1_DIR_OUTPUT_Pin GPIO_PIN_8
 #define AXIS1_DIR_OUTPUT_GPIO_Port GPIOE
 #define AXIS1_STEP_OUTPUT_Pin GPIO_PIN_9
@@ -71,22 +81,31 @@
 #define AXIS3_STEP_OUTPUT_GPIO_Port GPIOD
 #define AXIS2_DIR_INPUT_Pin GPIO_PIN_6
 #define AXIS2_DIR_INPUT_GPIO_Port GPIOC
+#define AXIS2_DIR_INPUT_EXTI_IRQn EXTI9_5_IRQn
 #define AXIS3_DIR_INPUT_Pin GPIO_PIN_7
 #define AXIS3_DIR_INPUT_GPIO_Port GPIOC
+#define AXIS3_DIR_INPUT_EXTI_IRQn EXTI9_5_IRQn
 #define AXIS2_STEP_OUTPUT_Pin GPIO_PIN_8
 #define AXIS2_STEP_OUTPUT_GPIO_Port GPIOC
 #define AXIS5_STEP_OUTPUT_Pin GPIO_PIN_9
 #define AXIS5_STEP_OUTPUT_GPIO_Port GPIOC
 #define AXIS4_DIR_INPUT_Pin GPIO_PIN_8
 #define AXIS4_DIR_INPUT_GPIO_Port GPIOA
+#define AXIS4_DIR_INPUT_EXTI_IRQn EXTI9_5_IRQn
 #define AXIS5_DIR_INPUT_Pin GPIO_PIN_9
 #define AXIS5_DIR_INPUT_GPIO_Port GPIOA
+#define AXIS5_DIR_INPUT_EXTI_IRQn EXTI9_5_IRQn
 #define AXIS3_STEP_INPUT_Pin GPIO_PIN_2
 #define AXIS3_STEP_INPUT_GPIO_Port GPIOD
+#define AXIS3_STEP_INPUT_EXTI_IRQn EXTI2_IRQn
 
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
+
+void _Error_Handler(char *, int);
+
+#define Error_Handler() _Error_Handler(__FILE__, __LINE__)
 
 /**
   * @}

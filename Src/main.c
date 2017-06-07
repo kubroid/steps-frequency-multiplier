@@ -3,6 +3,11 @@
   * File Name          : main.c
   * Description        : Main program body
   ******************************************************************************
+  ** This notice applies to any and all portions of this file
+  * that are not between comment pairs USER CODE BEGIN and
+  * USER CODE END. Other portions of this file, whether 
+  * inserted by the user or by software development tools
+  * are owned by their respective copyright owners.
   *
   * COPYRIGHT(c) 2017 STMicroelectronics
   *
@@ -63,24 +68,23 @@ DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
 #define OUT_BUF_SIZE        256
 
 
-static TIM_HandleTypeDef* ahAxisTim[] = {
-    &htim1,
-    &htim3,
-    &htim4,
-    &htim5,
-    &htim8
+struct AXIS_TIM_t
+{
+  TIM_HandleTypeDef*  h;
+  uint32_t            uwChannel;
+  uint32_t            uwDMAID;
+  uint32_t            uwDMASRC;
 };
-static const uint32_t auwAxisTimCh[] = {
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_3,
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_4
+const struct AXIS_TIM_t aTim[] = {
+  {&htim1, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
+  {&htim3, TIM_CHANNEL_3, TIM_DMA_ID_CC3, TIM_DMA_CC3},
+  {&htim4, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
+  {&htim5, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
+  {&htim8, TIM_CHANNEL_4, TIM_DMA_ID_CC4, TIM_DMA_CC4}
 };
 
 volatile const uint8_t auqPrescDiv[] = {1,2,2,2,1};
 volatile uint32_t auwPresc[AXIS_CNT] = {0};
-volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 
 volatile uint32_t auwPeriod[AXIS_CNT] = {0};
 volatile uint64_t aulTime[AXIS_CNT] = {0};
@@ -88,6 +92,7 @@ volatile uint64_t aulTime[AXIS_CNT] = {0};
 volatile uint8_t auqMoving[AXIS_CNT] = {0};
 volatile uint16_t auhWaiting[AXIS_CNT] = {0};
 volatile uint8_t auq1stStep[AXIS_CNT] = {0};
+volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 
 volatile uint8_t auqSteps[AXIS_CNT] = {0};
 
@@ -95,7 +100,7 @@ extern volatile uint32_t uwTick;
 volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
-uint16_t auhOCDMAVal[2*OUT_STEP_MULT] = {0};
+uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
 
 struct OUT_BUF_t
 {
@@ -143,7 +148,6 @@ const struct PORT_PIN_t saAxisDirOutputs[] = {
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
@@ -164,6 +168,9 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void static inline start_output(uint8_t axis);
 void static inline stop_output(uint8_t axis);
 uint8_t static inline output(uint8_t axis);
+void static inline setup_axis_timer(uint8_t axis);
+void static inline start_axis_timer(uint8_t axis);
+void static inline stop_axis_timer(uint8_t axis);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -208,15 +215,15 @@ uint16_t static inline out_presc(uint8_t axis)
 {
   auwPresc[axis] = aBuf[axis][auqBufOutPos[axis]].uhTime / auqPrescDiv[axis];
 
-  return auwPresc[axis] >= auqSteps[axis] ?
+  return auwPresc[axis] > auqSteps[axis] ?
     auwPresc[axis] - auqSteps[axis] :
     0 ;
 }
 
 void static inline tim_update(uint8_t axis)
 {
-  ahAxisTim[axis]->Instance->EGR |= TIM_EGR_UG; // update event
-  ahAxisTim[axis]->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
+  aTim[axis].h->Instance->EGR |= TIM_EGR_UG; // update event
+  aTim[axis].h->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
 }
 
 
@@ -245,6 +252,7 @@ void static inline setup_OC_DMA_array()
   }
 
   auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
+  auhOCDMAVal[OUT_STEP_MULT*2] = 0xFFFF;
 }
 
 // set axis DIR output pins same as inputs
@@ -263,18 +271,7 @@ void static inline setup_out_DIR_pins()
 // setup all out timers
 void static inline setup_out_timers()
 {
-  // get out timers period
-  uint16_t uhPeriod = HAL_RCC_GetHCLKFreq()/1000000 - 1;
-
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    // Enable the TIM Update interrupt
-    __HAL_TIM_ENABLE_IT(ahAxisTim[axis], TIM_IT_UPDATE);
-    // set default period
-    __HAL_TIM_SET_AUTORELOAD(ahAxisTim[axis], uhPeriod);
-    // generate an update event to reload the Period
-    tim_update(axis);
-  }
+  for ( uint8_t axis = AXIS_CNT; axis--; ) setup_axis_timer(axis);
 }
 
 // setup counter data
@@ -317,18 +314,23 @@ void static inline start_output(uint8_t axis)
   // exit if nothing to output
   if ( !need2output(axis) ) return;
 
+#if 1
   // set timer's data
-  __HAL_TIM_SET_PRESCALER( ahAxisTim[axis], out_presc(axis) );
-  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], auhOCDMAVal[0]);
+  __HAL_TIM_SET_PRESCALER(aTim[axis].h, out_presc(axis));
+  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, auhOCDMAVal[0]);
   // generate an update event to apply timer's data
   tim_update(axis);
 
   // start output timer in OC+DMA mode
   HAL_TIM_OC_Start_DMA(
-    ahAxisTim[axis], auwAxisTimCh[axis],
+    aTim[axis].h, aTim[axis].uwChannel,
     ((uint32_t*)&auhOCDMAVal[1]), (OUT_STEP_MULT*2 - 1)
   );
-
+#endif
+#if 0
+  // start output generation
+  start_axis_timer(axis);
+#endif
   // output is enabled
   auqOutputOn[axis] = 1;
 }
@@ -338,10 +340,16 @@ void static inline stop_output(uint8_t axis)
 {
   if ( !auqOutputOn[axis] ) return;
 
+#if 1
   // stop OC
-  __HAL_TIM_SET_COMPARE(ahAxisTim[axis], auwAxisTimCh[axis], 0xFFFF);
+  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, 0xFFFF);
   // stop output timer in OC+DMA mode
-  HAL_TIM_OC_Stop_DMA(ahAxisTim[axis], auwAxisTimCh[axis]);
+  HAL_TIM_OC_Stop_DMA(aTim[axis].h, aTim[axis].uwChannel);
+#endif
+#if 0
+  // start output generation
+  stop_axis_timer(axis);
+#endif
   // +1 to the current out pos
   goto_next_out_pos(axis);
   // output is disabled
@@ -434,11 +442,12 @@ void process_input_dirs()
 void on_axis_tim_update(uint8_t axis)
 {
   /* TIM Update event */
-  if ( __HAL_TIM_GET_FLAG(ahAxisTim[axis], TIM_FLAG_UPDATE) )
+  if ( __HAL_TIM_GET_FLAG(aTim[axis].h, TIM_FLAG_UPDATE) )
   {
-    if ( __HAL_TIM_GET_IT_SOURCE(ahAxisTim[axis], TIM_IT_UPDATE) )
+    if ( __HAL_TIM_GET_IT_SOURCE(aTim[axis].h, TIM_IT_UPDATE) )
     {
-      __HAL_TIM_CLEAR_IT(ahAxisTim[axis], TIM_IT_UPDATE);
+      // reset update flag
+      __HAL_TIM_CLEAR_IT(aTim[axis].h, TIM_IT_UPDATE);
 
       // we have finished some output
       stop_output(axis);
@@ -474,6 +483,116 @@ void process_sys_tick()
     }
   }
 }
+
+
+
+
+#define TIM_DMA_H   aTim[axis].h->hdma[aTim[axis].uwDMAID]
+#define TIM_DMA     aTim[axis].h->hdma[aTim[axis].uwDMAID]->Instance
+#define TIM_H       aTim[axis].h
+#define TIM_CH      aTim[axis].uwChannel
+#define TIM         aTim[axis].h->Instance
+
+typedef struct
+{
+  __IO uint32_t ISR;   /*!< DMA interrupt status register */
+  __IO uint32_t Reserved0;
+  __IO uint32_t IFCR;  /*!< DMA interrupt flag clear register */
+} DMA_Base_Registers;
+
+
+void static inline setup_axis_timer(uint8_t axis)
+{
+  // get out timer period
+  uint16_t uhPeriod = HAL_RCC_GetHCLKFreq()/1000000 - 1;
+  // Enable the TIM Update interrupt
+  __HAL_TIM_ENABLE_IT(TIM_H, TIM_IT_UPDATE);
+  // set default period
+  __HAL_TIM_SET_AUTORELOAD(TIM_H, uhPeriod);
+  // generate an update event to reload the Period
+  tim_update(axis);
+
+#if 0
+  /* Set the DMA Period elapsed callback */
+  TIM_DMA_H->XferCpltCallback = TIM_DMADelayPulseCplt;
+  /* Set the DMA error callback */
+  TIM_DMA_H->XferErrorCallback = TIM_DMAError ;
+
+
+  /* calculate DMA base and stream number */
+  DMA_Base_Registers *regs = (DMA_Base_Registers*)TIM_DMA_H->StreamBaseAddress;
+  /* Clear all interrupt flags at correct offset within the register */
+  regs->IFCR = 0x3FU << TIM_DMA_H->StreamIndex;
+  /* Enable Common interrupts*/
+  TIM_DMA->CR  |= DMA_IT_TC | DMA_IT_TE | DMA_IT_DME;
+  TIM_DMA->FCR |= DMA_IT_FE;
+
+
+  /* Clear DBM bit */
+  TIM_DMA->CR &= (uint32_t)(~DMA_SxCR_DBM);
+  /* Configure DMA Stream data length */
+  TIM_DMA->NDTR = (2*OUT_STEP_MULT);
+  /* Configure DMA Stream source address */
+  TIM_DMA->PAR = (uint32_t)&auhOCDMAVal[1];
+  /* Configure DMA Stream destination address */
+  switch ( TIM_CH ) {
+    case TIM_CHANNEL_1: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR1); break;
+    case TIM_CHANNEL_2: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR2); break;
+    case TIM_CHANNEL_3: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR3); break;
+    case TIM_CHANNEL_4: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR4); break;
+  }
+
+
+  /* Enable the Peripheral */
+  __HAL_DMA_ENABLE(TIM_DMA_H);
+#endif
+}
+
+void static inline start_axis_timer(uint8_t axis)
+{
+  // set timer's data
+  __HAL_TIM_SET_PRESCALER(TIM_H, out_presc(axis));
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
+  // generate an update event to apply timer's data
+  tim_update(axis);
+
+
+  /* Enable the TIM Capture/Compare DMA request */
+  __HAL_TIM_ENABLE_DMA(TIM_H, aTim[axis].uwDMASRC);
+
+
+  /* Enable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+
+
+  /* Enable the main output */
+  if ( IS_TIM_ADVANCED_INSTANCE(TIM) ) __HAL_TIM_MOE_ENABLE(TIM_H);
+  /* Enable the Peripheral */
+  __HAL_TIM_ENABLE(TIM_H);
+}
+
+void static inline stop_axis_timer(uint8_t axis)
+{
+  /* Disable the TIM Capture/Compare interrupt */
+  __HAL_TIM_DISABLE_DMA(TIM_H, aTim[axis].uwDMASRC);
+
+
+  /* Disable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
+
+
+  /* Disable the main output */
+  if ( IS_TIM_ADVANCED_INSTANCE(TIM) ) __HAL_TIM_MOE_DISABLE(TIM_H);
+  /* Disable the Peripheral */
+  __HAL_TIM_DISABLE(TIM_H);
+}
+
+
+#undef TIM_DMA_H
+#undef TIM_DMA
+#undef TIM_H
+#undef TIM_CH
+#undef TIM
 /* USER CODE END 0 */
 
 int main(void)
@@ -488,8 +607,16 @@ int main(void)
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
   /* Configure the system clock */
   SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
@@ -549,7 +676,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
     /**Initializes the CPU, AHB and APB busses clocks 
@@ -563,7 +690,7 @@ void SystemClock_Config(void)
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
     /**Configure the Systick interrupt time 
@@ -649,25 +776,25 @@ static void MX_TIM1_Init(void)
   htim1.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
@@ -679,7 +806,7 @@ static void MX_TIM1_Init(void)
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
@@ -691,7 +818,7 @@ static void MX_TIM1_Init(void)
   sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
   if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   HAL_TIM_MspPostInit(&htim1);
@@ -713,25 +840,25 @@ static void MX_TIM3_Init(void)
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   if (HAL_TIM_OC_Init(&htim3) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
@@ -740,7 +867,7 @@ static void MX_TIM3_Init(void)
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   HAL_TIM_MspPostInit(&htim3);
@@ -762,25 +889,25 @@ static void MX_TIM4_Init(void)
   htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   if (HAL_TIM_OC_Init(&htim4) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
@@ -789,7 +916,7 @@ static void MX_TIM4_Init(void)
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   HAL_TIM_MspPostInit(&htim4);
@@ -811,25 +938,25 @@ static void MX_TIM5_Init(void)
   htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   if (HAL_TIM_ConfigClockSource(&htim5, &sClockSourceConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   if (HAL_TIM_OC_Init(&htim5) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
@@ -838,7 +965,7 @@ static void MX_TIM5_Init(void)
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   HAL_TIM_MspPostInit(&htim5);
@@ -862,25 +989,25 @@ static void MX_TIM8_Init(void)
   htim8.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim8) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
   if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   if (HAL_TIM_OC_Init(&htim8) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
@@ -891,7 +1018,7 @@ static void MX_TIM8_Init(void)
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   if (HAL_TIM_OC_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
@@ -903,7 +1030,7 @@ static void MX_TIM8_Init(void)
   sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
   if (HAL_TIMEx_ConfigBreakDeadTime(&htim8, &sBreakDeadTimeConfig) != HAL_OK)
   {
-    Error_Handler();
+    _Error_Handler(__FILE__, __LINE__);
   }
 
   HAL_TIM_MspPostInit(&htim8);
@@ -1000,14 +1127,14 @@ static void MX_GPIO_Init(void)
   * @param  None
   * @retval None
   */
-void Error_Handler(void)
+void _Error_Handler(char * file, int line)
 {
-  /* USER CODE BEGIN Error_Handler */
+  /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   while(1) 
   {
   }
-  /* USER CODE END Error_Handler */ 
+  /* USER CODE END Error_Handler_Debug */ 
 }
 
 #ifdef USE_FULL_ASSERT
