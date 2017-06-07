@@ -40,6 +40,7 @@ void process_input_step(uint8_t axis);
 void process_input_dirs();
 void process_sys_tick();
 void on_axis_tim_update(uint8_t axis);
+void on_axis_DMA_xfer_done(uint8_t axis);
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
@@ -250,7 +251,7 @@ void DMA1_Stream0_IRQHandler(void)
   /* USER CODE END DMA1_Stream0_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim4_ch1);
   /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
-
+  on_axis_DMA_xfer_done(2);
   /* USER CODE END DMA1_Stream0_IRQn 1 */
 }
 
@@ -264,7 +265,7 @@ void DMA1_Stream2_IRQHandler(void)
   /* USER CODE END DMA1_Stream2_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim5_ch1);
   /* USER CODE BEGIN DMA1_Stream2_IRQn 1 */
-
+  on_axis_DMA_xfer_done(3);
   /* USER CODE END DMA1_Stream2_IRQn 1 */
 }
 
@@ -361,7 +362,7 @@ void DMA1_Stream7_IRQHandler(void)
   /* USER CODE END DMA1_Stream7_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim3_ch3);
   /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
-
+  on_axis_DMA_xfer_done(1);
   /* USER CODE END DMA1_Stream7_IRQn 1 */
 }
 
@@ -391,7 +392,7 @@ void DMA2_Stream1_IRQHandler(void)
   /* USER CODE END DMA2_Stream1_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim1_ch1);
   /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
-
+  on_axis_DMA_xfer_done(0);
   /* USER CODE END DMA2_Stream1_IRQn 1 */
 }
 
@@ -405,7 +406,7 @@ void DMA2_Stream7_IRQHandler(void)
   /* USER CODE END DMA2_Stream7_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim8_ch4_trig_com);
   /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
-
+  on_axis_DMA_xfer_done(4);
   /* USER CODE END DMA2_Stream7_IRQn 1 */
 }
 

@@ -252,11 +252,11 @@ void static inline setup_OC_DMA_array()
   }
 
   auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2] = 0xFFFF;
+  auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 1;
 }
 
 // set axis DIR output pins same as inputs
-void static inline setup_out_DIR_pins()
+void static inline setup_out_pins()
 {
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
@@ -317,14 +317,15 @@ void static inline start_output(uint8_t axis)
 #if 1
   // set timer's data
   __HAL_TIM_SET_PRESCALER(aTim[axis].h, out_presc(axis));
-  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, auhOCDMAVal[0]);
   // generate an update event to apply timer's data
   tim_update(axis);
+  // set timer's data
+  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, auhOCDMAVal[0]);
 
   // start output timer in OC+DMA mode
   HAL_TIM_OC_Start_DMA(
     aTim[axis].h, aTim[axis].uwChannel,
-    ((uint32_t*)&auhOCDMAVal[1]), (OUT_STEP_MULT*2 - 1)
+    ((uint32_t*)&auhOCDMAVal[1]), (2*OUT_STEP_MULT)
   );
 #endif
 #if 0
@@ -338,13 +339,11 @@ void static inline start_output(uint8_t axis)
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  if ( !auqOutputOn[axis] ) return;
+//  if ( !auqOutputOn[axis] ) return;
 
 #if 1
-  // stop OC
-  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, 0xFFFF);
-  // stop output timer in OC+DMA mode
-  HAL_TIM_OC_Stop_DMA(aTim[axis].h, aTim[axis].uwChannel);
+  // disable timer
+  aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
 #endif
 #if 0
   // start output generation
@@ -448,11 +447,19 @@ void on_axis_tim_update(uint8_t axis)
     {
       // reset update flag
       __HAL_TIM_CLEAR_IT(aTim[axis].h, TIM_IT_UPDATE);
-
+#if 0
       // we have finished some output
       stop_output(axis);
+#endif
     }
   }
+}
+
+// on axis DMA transfer complete
+void on_axis_DMA_xfer_done(uint8_t axis)
+{
+  // we have finished some output
+  stop_output(axis);
 }
 
 // on sys tick (every 1000us)
@@ -491,6 +498,7 @@ void process_sys_tick()
 #define TIM_DMA     aTim[axis].h->hdma[aTim[axis].uwDMAID]->Instance
 #define TIM_H       aTim[axis].h
 #define TIM_CH      aTim[axis].uwChannel
+#define TIM_DMA_SRC aTim[axis].uwDMASRC
 #define TIM         aTim[axis].h->Instance
 
 typedef struct
@@ -513,38 +521,16 @@ void static inline setup_axis_timer(uint8_t axis)
   tim_update(axis);
 
 #if 0
-  /* Set the DMA Period elapsed callback */
-  TIM_DMA_H->XferCpltCallback = TIM_DMADelayPulseCplt;
-  /* Set the DMA error callback */
-  TIM_DMA_H->XferErrorCallback = TIM_DMAError ;
+  /* Enable the DMA Stream */
+  HAL_DMA_Start_IT(TIM_DMA_H, (uint32_t)&auhOCDMAVal[1], (uint32_t)&(TIM->CCR1), (2*OUT_STEP_MULT - 1));
 
+  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
 
-  /* calculate DMA base and stream number */
-  DMA_Base_Registers *regs = (DMA_Base_Registers*)TIM_DMA_H->StreamBaseAddress;
-  /* Clear all interrupt flags at correct offset within the register */
-  regs->IFCR = 0x3FU << TIM_DMA_H->StreamIndex;
-  /* Enable Common interrupts*/
-  TIM_DMA->CR  |= DMA_IT_TC | DMA_IT_TE | DMA_IT_DME;
-  TIM_DMA->FCR |= DMA_IT_FE;
-
-
-  /* Clear DBM bit */
-  TIM_DMA->CR &= (uint32_t)(~DMA_SxCR_DBM);
-  /* Configure DMA Stream data length */
-  TIM_DMA->NDTR = (2*OUT_STEP_MULT);
-  /* Configure DMA Stream source address */
-  TIM_DMA->PAR = (uint32_t)&auhOCDMAVal[1];
-  /* Configure DMA Stream destination address */
-  switch ( TIM_CH ) {
-    case TIM_CHANNEL_1: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR1); break;
-    case TIM_CHANNEL_2: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR2); break;
-    case TIM_CHANNEL_3: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR3); break;
-    case TIM_CHANNEL_4: TIM_DMA->M0AR = (uint32_t)&(TIM->CCR4); break;
+  if(IS_TIM_ADVANCED_INSTANCE(TIM) != RESET)
+  {
+    /* Enable the main output */
+    __HAL_TIM_MOE_ENABLE(TIM_H);
   }
-
-
-  /* Enable the Peripheral */
-  __HAL_DMA_ENABLE(TIM_DMA_H);
 #endif
 }
 
@@ -557,33 +543,22 @@ void static inline start_axis_timer(uint8_t axis)
   tim_update(axis);
 
 
-  /* Enable the TIM Capture/Compare DMA request */
-  __HAL_TIM_ENABLE_DMA(TIM_H, aTim[axis].uwDMASRC);
+  /* Configure DMA Stream data length */
+  TIM_DMA->NDTR = (2*OUT_STEP_MULT - 1);
+  __HAL_DMA_ENABLE(TIM_DMA_H);
 
 
-  /* Enable the Output compare channel */
   TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
 
-
-  /* Enable the main output */
-  if ( IS_TIM_ADVANCED_INSTANCE(TIM) ) __HAL_TIM_MOE_ENABLE(TIM_H);
-  /* Enable the Peripheral */
   __HAL_TIM_ENABLE(TIM_H);
 }
 
 void static inline stop_axis_timer(uint8_t axis)
 {
-  /* Disable the TIM Capture/Compare interrupt */
-  __HAL_TIM_DISABLE_DMA(TIM_H, aTim[axis].uwDMASRC);
+  __HAL_DMA_DISABLE(TIM_DMA_H);
 
-
-  /* Disable the Output compare channel */
   TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
 
-
-  /* Disable the main output */
-  if ( IS_TIM_ADVANCED_INSTANCE(TIM) ) __HAL_TIM_MOE_DISABLE(TIM_H);
-  /* Disable the Peripheral */
   __HAL_TIM_DISABLE(TIM_H);
 }
 
@@ -592,6 +567,7 @@ void static inline stop_axis_timer(uint8_t axis)
 #undef TIM_DMA
 #undef TIM_H
 #undef TIM_CH
+#undef TIM_DMA_SRC
 #undef TIM
 /* USER CODE END 0 */
 
@@ -633,7 +609,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   setup_counter();
   setup_OC_DMA_array();
-  setup_out_DIR_pins();
+  setup_out_pins();
   setup_out_timers();
   /* USER CODE END 2 */
 
