@@ -1,6 +1,8 @@
-# Steps frequency multiplier
-Simple steps frequency multiplier based on STM32 dev boards. 
-For use with any CNC/3DPrint controller.
+# Step pulses frequency multiplier
+It's a very useful tool when your **CNC controller** can't output more than **20-50 KHz** of step pulses. 
+With this mupltiplier you can encrease the output frequency from **20-50 KHz** up to **2-4 MHz**.
+Such frequencies can be used for servo drivers or for step motor drivers (for the extra small microstep).
+Steps frequency multiplier it's a good solution when you are using **Mach3** or **LinuxCNC** soft with **LPT** (parallel) port output. Or when you are using a cheap **USB** controller like **Arduino** with **GRBL** firmware.
 
 ![1](https://cloud.githubusercontent.com/assets/16130975/23888395/eb75af6a-08b1-11e7-86b9-adae2919858f.png)
 ![1](https://cloud.githubusercontent.com/assets/16130975/23888399/eb7ce5a0-08b1-11e7-9daf-cbecc38b2927.png)
@@ -15,16 +17,18 @@ For use with any CNC/3DPrint controller.
 ### Methods
 * Uses **STM32CubeMX** to initialize all options of MCU
 * Uses latest **HAL** drivers
-* Uses **SW4STM32** IDE to build project
+* Uses **SW4STM32** IDE to build the project
 * Uses **EXTI** to capture input pulses
-* Uses timer's **OC** mode with DMA for the output
+* Uses timer's **OC** mode with **DMA** for the output
+* Uses **SysTick** timer to catch the timestamp (in us) of each input step
 
-### Active branches:
+### Active branch:
+* **F407VETx_OC_DMA_3**: The most stable method of output using timer's OC mode + DMA transfer
+
+### Test branches:
+* **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
 * **STM32F407VETx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F407VETx
 * **STM32F407VETx_OC_DMA_2**: Method based on STM32F407VETx_OC_DMA using only 2 timers for the output
 * **F407VETx_BUF**: Another method of output for the STM32F407VETx using buffer and timer's OC+DMA
-
-### Other branches:
-* **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
 * **STM32F103C8Tx_OC_DMA**: New fast method of output with timer's OC+DMA for the STM32F103C8Tx
 * **STM32F103C8Tx**: First (non tested) version for the STM32F103C8Tx
