@@ -6,6 +6,8 @@ Steps frequency multiplier it's a good solution when you are using **Mach3** or 
 
 ![1](https://cloud.githubusercontent.com/assets/16130975/23888395/eb75af6a-08b1-11e7-86b9-adae2919858f.png)
 ![1](https://cloud.githubusercontent.com/assets/16130975/23888399/eb7ce5a0-08b1-11e7-9daf-cbecc38b2927.png)
+![1](https://user-images.githubusercontent.com/16130975/26940716-94b039cc-4c9d-11e7-83ac-2319147041b3.jpg)
+![1](https://user-images.githubusercontent.com/16130975/26940755-bbe32db0-4c9d-11e7-9723-13ab55ed22e3.png)
 
 ## Downloads
 * https://github.com/MX-Master/steps-frequency-multiplier/releases
