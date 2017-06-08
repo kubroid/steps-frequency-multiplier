@@ -69,9 +69,7 @@
 							<tool id="fr.ac6.managedbuild.tool.gnu.cross.cpp.linker.1041383917" name="MCU G++ Linker" superClass="fr.ac6.managedbuild.tool.gnu.cross.cpp.linker" />
 							<tool id="fr.ac6.managedbuild.tool.gnu.archiver.1116602046" name="MCU GCC Archiver" superClass="fr.ac6.managedbuild.tool.gnu.archiver" />
 							<tool id="fr.ac6.managedbuild.tool.gnu.cross.assembler.122360561" name="MCU GCC Assembler" superClass="fr.ac6.managedbuild.tool.gnu.cross.assembler">
-								<option id="gnu.both.asm.option.include.paths.425134389" name="Include paths (-I)" superClass="gnu.both.asm.option.include.paths" valueType="includePath">
-									
-								</option>
+								<option id="gnu.both.asm.option.include.paths.425134389" name="Include paths (-I)" superClass="gnu.both.asm.option.include.paths" />
 								<inputType id="cdt.managedbuild.tool.gnu.assembler.input.1984437519" superClass="cdt.managedbuild.tool.gnu.assembler.input" />
 								<inputType id="fr.ac6.managedbuild.tool.gnu.cross.assembler.input.897407607" superClass="fr.ac6.managedbuild.tool.gnu.cross.assembler.input" />
 							</tool>
@@ -155,9 +153,7 @@
 							<tool id="fr.ac6.managedbuild.tool.gnu.cross.cpp.linker.1041383917" name="MCU G++ Linker" superClass="fr.ac6.managedbuild.tool.gnu.cross.cpp.linker" />
 							<tool id="fr.ac6.managedbuild.tool.gnu.archiver.1116602046" name="MCU GCC Archiver" superClass="fr.ac6.managedbuild.tool.gnu.archiver" />
 							<tool id="fr.ac6.managedbuild.tool.gnu.cross.assembler.122360561" name="MCU GCC Assembler" superClass="fr.ac6.managedbuild.tool.gnu.cross.assembler">
-								<option id="gnu.both.asm.option.include.paths.425134389" name="Include paths (-I)" superClass="gnu.both.asm.option.include.paths" valueType="includePath">
-									
-								</option>
+								<option id="gnu.both.asm.option.include.paths.425134389" name="Include paths (-I)" superClass="gnu.both.asm.option.include.paths" />
 								<inputType id="cdt.managedbuild.tool.gnu.assembler.input.1984437519" superClass="cdt.managedbuild.tool.gnu.assembler.input" />
 								<inputType id="fr.ac6.managedbuild.tool.gnu.cross.assembler.input.897407607" superClass="fr.ac6.managedbuild.tool.gnu.cross.assembler.input" />
 							</tool>

@@ -168,18 +168,34 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void static inline start_output(uint8_t axis);
 void static inline stop_output(uint8_t axis);
 uint8_t static inline output(uint8_t axis);
-void static inline setup_axis_timer(uint8_t axis);
 void static inline start_axis_timer(uint8_t axis);
 void static inline stop_axis_timer(uint8_t axis);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
-// useful tools
+
+#define TIM_DMA_H     aTim[axis].h->hdma[aTim[axis].uwDMAID]
+#define TIM_DMA       aTim[axis].h->hdma[aTim[axis].uwDMAID]->Instance
+#define TIM_H         aTim[axis].h
+#define TIM_CH        aTim[axis].uwChannel
+#define TIM_DMA_SRC   aTim[axis].uwDMASRC
+#define TIM           aTim[axis].h->Instance
+#define BUF_IN_TYPE   aBuf[axis] [BUF_IN_POS].uqType
+#define BUF_IN_TIME   aBuf[axis] [BUF_IN_POS].uhTime
+#define BUF_IN_POS    auqBufAddPos [axis]
+#define BUF_OUT_TYPE  aBuf[axis] [BUF_OUT_POS].uqType
+#define BUF_OUT_TIME  aBuf[axis] [BUF_OUT_POS].uhTime
+#define BUF_OUT_POS   auqBufOutPos [axis]
+
+
+
+// --- TOOLS ---
+
 void static inline add2buf_step(uint8_t axis, uint16_t time)
 {
-  aBuf[axis][auqBufAddPos[axis]].uqType = 0;
-  aBuf[axis][auqBufAddPos[axis]].uhTime = time;
-  ++auqBufAddPos[axis];
+  BUF_IN_TYPE = 0; // 0 = STEP
+  BUF_IN_TIME = time;
+  ++BUF_IN_POS;
 
   // start output if needed
   if ( !output(axis) ) start_output(axis);
@@ -187,9 +203,9 @@ void static inline add2buf_step(uint8_t axis, uint16_t time)
 
 void static inline add2buf_dir(uint8_t axis)
 {
-  aBuf[axis][auqBufAddPos[axis]].uqType = 1;
-  aBuf[axis][auqBufAddPos[axis]].uhTime = 1;
-  ++auqBufAddPos[axis];
+  BUF_IN_TYPE = 1; // 1 = DIR
+  BUF_IN_TIME = 1;
+  ++BUF_IN_POS;
 
   // start output if needed
   if ( !output(axis) ) start_output(axis);
@@ -197,37 +213,51 @@ void static inline add2buf_dir(uint8_t axis)
 
 void static inline goto_next_out_pos(uint8_t axis)
 {
-  aBuf[axis][auqBufOutPos[axis]].uhTime = 0;
-  ++auqBufOutPos[axis];
+  BUF_OUT_TIME = 0;
+  ++BUF_OUT_POS;
 }
 
 uint16_t static inline need2output(uint8_t axis)
 {
-  return aBuf[axis][auqBufOutPos[axis]].uhTime;
+  return BUF_OUT_TIME;
 }
 
 uint8_t static inline need2output_dir(uint8_t axis)
 {
-  return aBuf[axis][auqBufOutPos[axis]].uqType;
+  return BUF_OUT_TYPE;
 }
 
 uint16_t static inline out_presc(uint8_t axis)
 {
-  auwPresc[axis] = aBuf[axis][auqBufOutPos[axis]].uhTime / auqPrescDiv[axis];
+  auwPresc[axis] = BUF_OUT_TIME / auqPrescDiv[axis];
 
-  return auwPresc[axis] > auqSteps[axis] ?
-    auwPresc[axis] - auqSteps[axis] :
-    0 ;
+  return (auwPresc[axis] - (auqSteps[axis]/4));
 }
 
 void static inline tim_update(uint8_t axis)
 {
-  aTim[axis].h->Instance->EGR |= TIM_EGR_UG; // update event
-  aTim[axis].h->Instance->SR  &= ~TIM_SR_UIF; // reset update flag
+  TIM->EGR |= TIM_EGR_UG; // update event
+  TIM->SR  &= ~TIM_SR_UIF; // reset update flag
+}
+
+// get timestamp in US since system startup
+// value is overloaded after 49.71 days (256*256*256*256 ms)
+uint64_t static inline time_us()
+{
+  static uint64_t t[2] = {0};
+
+  t[0] = t[1];
+  t[1] = uwTick*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
+
+  return t[0] < t[1] ?
+    t[1] :
+    t[1] + 1000 ;
 }
 
 
 
+
+// --- SETUP ---
 
 // setup DMA array values
 void static inline setup_OC_DMA_array()
@@ -252,7 +282,7 @@ void static inline setup_OC_DMA_array()
   }
 
   auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 1;
+  auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
 }
 
 // set axis DIR output pins same as inputs
@@ -271,7 +301,13 @@ void static inline setup_out_pins()
 // setup all out timers
 void static inline setup_out_timers()
 {
-  for ( uint8_t axis = AXIS_CNT; axis--; ) setup_axis_timer(axis);
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    // set default period
+    __HAL_TIM_SET_AUTORELOAD( TIM_H, (HAL_RCC_GetHCLKFreq()/1000000 - 1) );
+    // generate an update event to reload the Period
+    tim_update(axis);
+  }
 }
 
 // setup counter data
@@ -284,22 +320,7 @@ void static inline setup_counter()
 
 
 
-// get timestamp in US since system startup
-// value is overloaded after 49.71 days (256*256*256*256 ms)
-uint64_t static inline time_us()
-{
-  static uint64_t t[2] = {0};
-
-  t[0] = t[1];
-  t[1] = uwTick*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
-
-  return t[0] < t[1] ?
-    t[1] :
-    t[1] + 1000 ;
-}
-
-
-
+// --- OUTPUT PROCESSING ---
 
 // start output for selected axis
 void static inline start_output(uint8_t axis)
@@ -314,24 +335,9 @@ void static inline start_output(uint8_t axis)
   // exit if nothing to output
   if ( !need2output(axis) ) return;
 
-#if 1
-  // set timer's data
-  __HAL_TIM_SET_PRESCALER(aTim[axis].h, out_presc(axis));
-  // generate an update event to apply timer's data
-  tim_update(axis);
-  // set timer's data
-  __HAL_TIM_SET_COMPARE(aTim[axis].h, aTim[axis].uwChannel, auhOCDMAVal[0]);
-
-  // start output timer in OC+DMA mode
-  HAL_TIM_OC_Start_DMA(
-    aTim[axis].h, aTim[axis].uwChannel,
-    ((uint32_t*)&auhOCDMAVal[1]), (2*OUT_STEP_MULT)
-  );
-#endif
-#if 0
   // start output generation
   start_axis_timer(axis);
-#endif
+
   // output is enabled
   auqOutputOn[axis] = 1;
 }
@@ -339,16 +345,8 @@ void static inline start_output(uint8_t axis)
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-//  if ( !auqOutputOn[axis] ) return;
-
-#if 1
-  // disable timer
-  aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
-#endif
-#if 0
   // start output generation
   stop_axis_timer(axis);
-#endif
   // +1 to the current out pos
   goto_next_out_pos(axis);
   // output is disabled
@@ -366,8 +364,52 @@ uint8_t static inline output(uint8_t axis)
   return auqOutputOn[axis];
 }
 
+void static inline start_axis_timer(uint8_t axis)
+{
+  // set timer's prescaler
+  __HAL_TIM_SET_PRESCALER(TIM_H, out_presc(axis));
+  // generate an update event to apply timer's data
+  tim_update(axis);
+  // set timer's value for comparing
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
+
+  /* Enable the DMA Stream */
+  HAL_DMA_Start_IT(
+    TIM_DMA_H,
+    (uint32_t)&auhOCDMAVal[1],
+    (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U)),
+    (2*OUT_STEP_MULT)
+  );
+  /* Enable the TIM Capture/Compare DMA request */
+  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
+  /* Enable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+  /* Enable the main output */
+  if(IS_TIM_ADVANCED_INSTANCE(TIM) != RESET)
+  {
+    __HAL_TIM_MOE_ENABLE(TIM_H);
+  }
+  /* Enable the Peripheral */
+  __HAL_TIM_ENABLE(TIM_H);
+}
+
+void static inline stop_axis_timer(uint8_t axis)
+{
+  // disable timer
+  aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
+}
+
+// on axis DMA transfer complete
+void on_axis_DMA_xfer_done(uint8_t axis)
+{
+  // we have finished some output
+  stop_output(axis);
+}
 
 
+
+
+// --- INPUT PROCESSING ---
 
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
@@ -437,31 +479,6 @@ void process_input_dirs()
   }
 }
 
-// on axis TIM update
-void on_axis_tim_update(uint8_t axis)
-{
-  /* TIM Update event */
-  if ( __HAL_TIM_GET_FLAG(aTim[axis].h, TIM_FLAG_UPDATE) )
-  {
-    if ( __HAL_TIM_GET_IT_SOURCE(aTim[axis].h, TIM_IT_UPDATE) )
-    {
-      // reset update flag
-      __HAL_TIM_CLEAR_IT(aTim[axis].h, TIM_IT_UPDATE);
-#if 0
-      // we have finished some output
-      stop_output(axis);
-#endif
-    }
-  }
-}
-
-// on axis DMA transfer complete
-void on_axis_DMA_xfer_done(uint8_t axis)
-{
-  // we have finished some output
-  stop_output(axis);
-}
-
 // on sys tick (every 1000us)
 void process_sys_tick()
 {
@@ -494,81 +511,19 @@ void process_sys_tick()
 
 
 
-#define TIM_DMA_H   aTim[axis].h->hdma[aTim[axis].uwDMAID]
-#define TIM_DMA     aTim[axis].h->hdma[aTim[axis].uwDMAID]->Instance
-#define TIM_H       aTim[axis].h
-#define TIM_CH      aTim[axis].uwChannel
-#define TIM_DMA_SRC aTim[axis].uwDMASRC
-#define TIM         aTim[axis].h->Instance
-
-typedef struct
-{
-  __IO uint32_t ISR;   /*!< DMA interrupt status register */
-  __IO uint32_t Reserved0;
-  __IO uint32_t IFCR;  /*!< DMA interrupt flag clear register */
-} DMA_Base_Registers;
-
-
-void static inline setup_axis_timer(uint8_t axis)
-{
-  // get out timer period
-  uint16_t uhPeriod = HAL_RCC_GetHCLKFreq()/1000000 - 1;
-  // Enable the TIM Update interrupt
-  __HAL_TIM_ENABLE_IT(TIM_H, TIM_IT_UPDATE);
-  // set default period
-  __HAL_TIM_SET_AUTORELOAD(TIM_H, uhPeriod);
-  // generate an update event to reload the Period
-  tim_update(axis);
-
-#if 0
-  /* Enable the DMA Stream */
-  HAL_DMA_Start_IT(TIM_DMA_H, (uint32_t)&auhOCDMAVal[1], (uint32_t)&(TIM->CCR1), (2*OUT_STEP_MULT - 1));
-
-  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
-
-  if(IS_TIM_ADVANCED_INSTANCE(TIM) != RESET)
-  {
-    /* Enable the main output */
-    __HAL_TIM_MOE_ENABLE(TIM_H);
-  }
-#endif
-}
-
-void static inline start_axis_timer(uint8_t axis)
-{
-  // set timer's data
-  __HAL_TIM_SET_PRESCALER(TIM_H, out_presc(axis));
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
-  // generate an update event to apply timer's data
-  tim_update(axis);
-
-
-  /* Configure DMA Stream data length */
-  TIM_DMA->NDTR = (2*OUT_STEP_MULT - 1);
-  __HAL_DMA_ENABLE(TIM_DMA_H);
-
-
-  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
-
-  __HAL_TIM_ENABLE(TIM_H);
-}
-
-void static inline stop_axis_timer(uint8_t axis)
-{
-  __HAL_DMA_DISABLE(TIM_DMA_H);
-
-  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
-
-  __HAL_TIM_DISABLE(TIM_H);
-}
-
-
 #undef TIM_DMA_H
 #undef TIM_DMA
 #undef TIM_H
 #undef TIM_CH
 #undef TIM_DMA_SRC
 #undef TIM
+#undef BUF_IN_TYPE
+#undef BUF_IN_TIME
+#undef BUF_IN_POS
+#undef BUF_OUT_TYPE
+#undef BUF_OUT_TIME
+#undef BUF_OUT_POS
+
 /* USER CODE END 0 */
 
 int main(void)
@@ -709,21 +664,6 @@ static void MX_NVIC_Init(void)
   /* DMA2_Stream7_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
-  /* TIM1_UP_TIM10_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
-  /* TIM3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM3_IRQn);
-  /* TIM4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM4_IRQn);
-  /* TIM8_UP_TIM13_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM8_UP_TIM13_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM8_UP_TIM13_IRQn);
-  /* TIM5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(TIM5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM5_IRQn);
   /* EXTI2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
@@ -766,7 +706,7 @@ static void MX_TIM1_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
@@ -830,7 +770,7 @@ static void MX_TIM3_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
   {
@@ -879,7 +819,7 @@ static void MX_TIM4_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
   {
@@ -928,7 +868,7 @@ static void MX_TIM5_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
   {
@@ -979,7 +919,7 @@ static void MX_TIM8_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
   {

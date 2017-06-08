@@ -39,7 +39,6 @@
 void process_input_step(uint8_t axis);
 void process_input_dirs();
 void process_sys_tick();
-void on_axis_tim_update(uint8_t axis);
 void on_axis_DMA_xfer_done(uint8_t axis);
 /* USER CODE END 0 */
 
@@ -49,11 +48,6 @@ extern DMA_HandleTypeDef hdma_tim3_ch3;
 extern DMA_HandleTypeDef hdma_tim4_ch1;
 extern DMA_HandleTypeDef hdma_tim5_ch1;
 extern DMA_HandleTypeDef hdma_tim8_ch4_trig_com;
-extern TIM_HandleTypeDef htim1;
-extern TIM_HandleTypeDef htim3;
-extern TIM_HandleTypeDef htim4;
-extern TIM_HandleTypeDef htim5;
-extern TIM_HandleTypeDef htim8;
 
 /******************************************************************************/
 /*            Cortex-M4 Processor Interruption and Exception Handlers         */ 
@@ -289,70 +283,6 @@ void EXTI9_5_IRQHandler(void)
 }
 
 /**
-* @brief This function handles TIM1 update interrupt and TIM10 global interrupt.
-*/
-void TIM1_UP_TIM10_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 0 */
-  on_axis_tim_update(0);
-  UNUSED(htim1);
-#if 0
-  /* USER CODE END TIM1_UP_TIM10_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim1);
-  /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 1 */
-#endif
-  /* USER CODE END TIM1_UP_TIM10_IRQn 1 */
-}
-
-/**
-* @brief This function handles TIM3 global interrupt.
-*/
-void TIM3_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM3_IRQn 0 */
-  on_axis_tim_update(1);
-  UNUSED(htim3);
-#if 0
-  /* USER CODE END TIM3_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim3);
-  /* USER CODE BEGIN TIM3_IRQn 1 */
-#endif
-  /* USER CODE END TIM3_IRQn 1 */
-}
-
-/**
-* @brief This function handles TIM4 global interrupt.
-*/
-void TIM4_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM4_IRQn 0 */
-  on_axis_tim_update(2);
-  UNUSED(htim4);
-#if 0
-  /* USER CODE END TIM4_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim4);
-  /* USER CODE BEGIN TIM4_IRQn 1 */
-#endif
-  /* USER CODE END TIM4_IRQn 1 */
-}
-
-/**
-* @brief This function handles TIM8 update interrupt and TIM13 global interrupt.
-*/
-void TIM8_UP_TIM13_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM8_UP_TIM13_IRQn 0 */
-  on_axis_tim_update(4);
-  UNUSED(htim8);
-#if 0
-  /* USER CODE END TIM8_UP_TIM13_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim8);
-  /* USER CODE BEGIN TIM8_UP_TIM13_IRQn 1 */
-#endif
-  /* USER CODE END TIM8_UP_TIM13_IRQn 1 */
-}
-
-/**
 * @brief This function handles DMA1 stream7 global interrupt.
 */
 void DMA1_Stream7_IRQHandler(void)
@@ -364,22 +294,6 @@ void DMA1_Stream7_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
   on_axis_DMA_xfer_done(1);
   /* USER CODE END DMA1_Stream7_IRQn 1 */
-}
-
-/**
-* @brief This function handles TIM5 global interrupt.
-*/
-void TIM5_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM5_IRQn 0 */
-  on_axis_tim_update(3);
-  UNUSED(htim5);
-#if 0
-  /* USER CODE END TIM5_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim5);
-  /* USER CODE BEGIN TIM5_IRQn 1 */
-#endif
-  /* USER CODE END TIM5_IRQn 1 */
 }
 
 /**
