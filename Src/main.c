@@ -74,18 +74,18 @@ struct AXIS_TIM_t
   uint32_t            uwChannel;
   uint32_t            uwDMAID;
   uint32_t            uwDMASRC;
+  uint8_t             uqPrescDiv;
+  uint8_t             uqPeriod16; // have 16 bit period or not
 };
 const struct AXIS_TIM_t aTim[] = {
-  {&htim1, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
-  {&htim3, TIM_CHANNEL_3, TIM_DMA_ID_CC3, TIM_DMA_CC3},
-  {&htim4, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
-  {&htim5, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
-  {&htim8, TIM_CHANNEL_4, TIM_DMA_ID_CC4, TIM_DMA_CC4}
+  {&htim1, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1, 1, 1},
+  {&htim3, TIM_CHANNEL_3, TIM_DMA_ID_CC3, TIM_DMA_CC3, 2, 1},
+  {&htim4, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1, 2, 1},
+  {&htim5, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1, 2, 0},
+  {&htim8, TIM_CHANNEL_4, TIM_DMA_ID_CC4, TIM_DMA_CC4, 2, 1}
 };
 
-volatile const uint8_t auqPrescDiv[] = {1,2,2,2,1};
 volatile uint32_t auwPresc[AXIS_CNT] = {0};
-
 volatile uint32_t auwPeriod[AXIS_CNT] = {0};
 volatile uint64_t aulTime[AXIS_CNT] = {0};
 
@@ -101,6 +101,7 @@ volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
 uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
+uint32_t auwOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
 
 struct OUT_BUF_t
 {
@@ -179,12 +180,14 @@ void static inline stop_axis_timer(uint8_t axis);
 #define TIM_H         aTim[axis].h
 #define TIM_CH        aTim[axis].uwChannel
 #define TIM_DMA_SRC   aTim[axis].uwDMASRC
+#define TIM_PSC_DIV   aTim[axis].uqPrescDiv
+#define TIM_PERIOD16  aTim[axis].uqPeriod16
 #define TIM           aTim[axis].h->Instance
-#define BUF_IN_TYPE   aBuf[axis] [BUF_IN_POS].uqType
-#define BUF_IN_TIME   aBuf[axis] [BUF_IN_POS].uhTime
-#define BUF_IN_POS    auqBufAddPos [axis]
-#define BUF_OUT_TYPE  aBuf[axis] [BUF_OUT_POS].uqType
-#define BUF_OUT_TIME  aBuf[axis] [BUF_OUT_POS].uhTime
+#define BUF_IN_TYPE   aBuf[axis][BUF_IN_POS].uqType
+#define BUF_IN_TIME   aBuf[axis][BUF_IN_POS].uhTime
+#define BUF_IN_POS    auqBufAddPos[axis]
+#define BUF_OUT_TYPE  aBuf[axis][BUF_OUT_POS].uqType
+#define BUF_OUT_TIME  aBuf[axis][BUF_OUT_POS].uhTime
 #define BUF_OUT_POS   auqBufOutPos [axis]
 
 
@@ -229,9 +232,9 @@ uint8_t static inline need2output_dir(uint8_t axis)
 
 uint16_t static inline out_presc(uint8_t axis)
 {
-  auwPresc[axis] = BUF_OUT_TIME / auqPrescDiv[axis];
+  auwPresc[axis] = (BUF_OUT_TIME - (auqSteps[axis]/2)) / TIM_PSC_DIV;
 
-  return (auwPresc[axis] - (auqSteps[axis]/4));
+  return auwPresc[axis];
 }
 
 void static inline tim_update(uint8_t axis)
@@ -279,10 +282,13 @@ void static inline setup_OC_DMA_array()
     }
 
     auhOCDMAVal[i] = c;
+    auwOCDMAVal[i] = c;
   }
 
   auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
+  auwOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
   auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
+  auwOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
 }
 
 // set axis DIR output pins same as inputs
@@ -371,12 +377,12 @@ void static inline start_axis_timer(uint8_t axis)
   // generate an update event to apply timer's data
   tim_update(axis);
   // set timer's value for comparing
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, TIM_PERIOD16 ? auhOCDMAVal[0] : auwOCDMAVal[0]);
 
   /* Enable the DMA Stream */
   HAL_DMA_Start_IT(
     TIM_DMA_H,
-    (uint32_t)&auhOCDMAVal[1],
+    (TIM_PERIOD16 ? (uint32_t)&auhOCDMAVal[1] : (uint32_t)&auwOCDMAVal[1]),
     (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U)),
     (2*OUT_STEP_MULT)
   );
@@ -523,6 +529,8 @@ void process_sys_tick()
 #undef BUF_OUT_TYPE
 #undef BUF_OUT_TIME
 #undef BUF_OUT_POS
+#undef TIM_PSC_DIV
+#undef TIM_PERIOD16
 
 /* USER CODE END 0 */
 
@@ -959,8 +967,8 @@ static void MX_TIM8_Init(void)
 static void MX_DMA_Init(void) 
 {
   /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
 }
 

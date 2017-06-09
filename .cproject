@@ -185,7 +185,7 @@
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
 	<storageModule moduleId="refreshScope" versionNumber="2">
 		<configuration configurationName="Debug">
-			<resource resourceType="PROJECT" workspacePath="STM32F407VETx_OC_DMA"/>
+			<resource resourceType="PROJECT" workspacePath="/STM32F407VETx_OC_DMA"/>
 		</configuration>
 		<configuration configurationName="Release"/>
 	</storageModule>
