@@ -372,13 +372,11 @@ void static inline start_axis_timer(uint8_t axis)
   __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
   /* Enable the Output compare channel */
   TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
-#if 0
   /* Enable the main output */
-  if(IS_TIM_ADVANCED_INSTANCE(TIM) != RESET)
+  if(IS_TIM_BREAK_INSTANCE(TIM) != RESET)
   {
     __HAL_TIM_MOE_ENABLE(TIM_H);
   }
-#endif
   /* Enable the Peripheral */
   __HAL_TIM_ENABLE(TIM_H);
 }
