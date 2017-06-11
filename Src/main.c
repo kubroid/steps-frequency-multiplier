@@ -151,7 +151,6 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
                                 
                                 
 
-
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 void static inline start_output(uint8_t axis);
