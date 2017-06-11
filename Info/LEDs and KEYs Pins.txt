@@ -1,3 +1,0 @@
-STM32F407VET6 dev board:
-	LEDs: PA6, PA7
-	KEYs: PE3, PE4
