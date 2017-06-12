@@ -418,6 +418,8 @@ void process_input_step(uint8_t axis)
 {
   static uint64_t t = 0;
 
+  __HAL_GPIO_EXTI_CLEAR_IT(saAxisStepInputs[axis].PIN);
+
   // more steps to output
   ++auqSteps[axis];
 
