@@ -204,6 +204,7 @@ void EXTI3_IRQHandler(void)
 void DMA1_Channel1_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel1_IRQn 0 */
+  UNUSED(hdma_tim4_ch1);
 #if 0
   /* USER CODE END DMA1_Channel1_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim4_ch1);
@@ -219,6 +220,7 @@ void DMA1_Channel1_IRQHandler(void)
 void DMA1_Channel2_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel2_IRQn 0 */
+  UNUSED(hdma_tim1_ch1);
 #if 0
   /* USER CODE END DMA1_Channel2_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim1_ch1);
@@ -234,6 +236,7 @@ void DMA1_Channel2_IRQHandler(void)
 void DMA1_Channel6_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel6_IRQn 0 */
+  UNUSED(hdma_tim3_ch1_trig);
 #if 0
   /* USER CODE END DMA1_Channel6_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim3_ch1_trig);
@@ -249,6 +252,7 @@ void DMA1_Channel6_IRQHandler(void)
 void DMA1_Channel7_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel7_IRQn 0 */
+UNUSED(hdma_tim2_ch2_ch4);
 #if 0
   /* USER CODE END DMA1_Channel7_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim2_ch2_ch4);
