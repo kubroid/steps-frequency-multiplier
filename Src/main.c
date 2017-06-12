@@ -361,17 +361,25 @@ void static inline start_axis_timer(uint8_t axis)
   // set timer's value for comparing
   __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
 
-  /* Enable the DMA Stream */
-  HAL_DMA_Start_IT(
-    TIM_DMA_H,
-    (uint32_t)&auhOCDMAVal[1],
-    (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U)),
-    (2*OUT_STEP_MULT)
-  );
+  /* Disable the peripheral */
+  __HAL_DMA_DISABLE(TIM_DMA_H);
+  /* Configure DMA Channel data length */
+  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT);
+  /* Configure DMA Channel destination address */
+  TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
+  /* Configure DMA Channel source address */
+  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal[1];
+  /* Enable the transfer complete interrupt */
+  __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
+  /* Enable the Half transfer complete interrupt */
+   /* Enable the Peripheral */
+  __HAL_DMA_ENABLE(TIM_DMA_H);
+
   /* Enable the TIM Capture/Compare DMA request */
   __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
   /* Enable the Output compare channel */
   TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+
   /* Enable the main output */
   if(IS_TIM_BREAK_INSTANCE(TIM) != RESET)
   {
