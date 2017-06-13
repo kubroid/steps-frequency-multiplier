@@ -24,8 +24,9 @@ Steps frequency multiplier it's a good solution when you are using **Mach3** or 
 * Uses timer's **OC** mode with **DMA** for the output
 * Uses **SysTick** timer to catch the timestamp (in us) of each input step
 
-### Active branch:
-* **F407VETx_OC_DMA_3**: The most stable method of output using timer's OC mode + DMA transfer
+### Active branches:
+* **F407VETx_OC_DMA_3**: The most stable method of output (for the STM32F407VETx) using timer's OC mode + DMA
+* **F103C8Tx_OC_DMA_3**: The most stable method of output (for the STM32F103C8Tx) using timer's OC mode + DMA
 
 ### Test branches:
 * **STM32F407VETx_old**: Old and slow method of output for the STM32F407VETx
