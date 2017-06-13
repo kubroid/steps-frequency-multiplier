@@ -265,30 +265,20 @@ uint64_t static inline time_us()
 // setup DMA array values
 void static inline setup_OC_DMA_array()
 {
-  uint8_t uqPeriod = HAL_RCC_GetHCLKFreq()/1000000;
-  uint8_t uqWidth = uqPeriod / (OUT_STEP_MULT*2);
-  uint8_t uqWidthDivLost = uqPeriod % (OUT_STEP_MULT*2);
+  uint32_t clk    = HAL_RCC_GetHCLKFreq();
+  uint32_t width  = clk / (OUT_STEP_MULT*2);
 
-  for ( uint8_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
+  for ( uint32_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
   {
-    if ( uqWidthDivLost )
-    {
-      c += uqWidth + 1;
-      --uqWidthDivLost;
-    }
-    else
-    {
-      c += uqWidth;
-    }
-
-    auhOCDMAVal[i] = c;
-    auwOCDMAVal[i] = c;
+    c += width;
+    auhOCDMAVal[i] = c/1000000;
+    auwOCDMAVal[i] = auhOCDMAVal[i];
   }
 
-  auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
-  auwOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
-  auwOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
+  auhOCDMAVal[OUT_STEP_MULT*2 - 1]  = clk/1000000 - 1;
+  auwOCDMAVal[OUT_STEP_MULT*2 - 1]  = auhOCDMAVal[OUT_STEP_MULT*2 - 1];
+  auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
+  auwOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
 }
 
 // set axis DIR output pins same as inputs
@@ -379,17 +369,24 @@ void static inline start_axis_timer(uint8_t axis)
   // set timer's value for comparing
   __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, TIM_PERIOD16 ? auhOCDMAVal[0] : auwOCDMAVal[0]);
 
-  /* Enable the DMA Stream */
-  HAL_DMA_Start_IT(
-    TIM_DMA_H,
-    (TIM_PERIOD16 ? (uint32_t)&auhOCDMAVal[1] : (uint32_t)&auwOCDMAVal[1]),
-    (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U)),
-    (2*OUT_STEP_MULT)
-  );
+  /* Clear DBM bit */
+  TIM_DMA->CR &= (uint32_t)(~DMA_SxCR_DBM);
+  /* Configure DMA Channel data length */
+  TIM_DMA_H->Instance->NDTR = (2*OUT_STEP_MULT);
+  /* Configure DMA Channel destination address */
+  TIM_DMA->PAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
+  /* Configure DMA Channel source address */
+  TIM_DMA->M0AR = (uint32_t)&auhOCDMAVal[1];
+  /* Enable the transfer complete interrupt */
+  __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
+  /* Enable the Peripheral */
+  __HAL_DMA_ENABLE(TIM_DMA_H);
+
   /* Enable the TIM Capture/Compare DMA request */
   __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
   /* Enable the Output compare channel */
   TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+
   /* Enable the main output */
   if(IS_TIM_ADVANCED_INSTANCE(TIM) != RESET)
   {
@@ -408,6 +405,9 @@ void static inline stop_axis_timer(uint8_t axis)
 // on axis DMA transfer complete
 void on_axis_DMA_xfer_done(uint8_t axis)
 {
+  /* Clear the transfer complete flag */
+  __HAL_DMA_CLEAR_FLAG(TIM_DMA_H, __HAL_DMA_GET_TC_FLAG_INDEX(TIM_DMA_H));
+
   // we have finished some output
   stop_output(axis);
 }
@@ -421,6 +421,8 @@ void on_axis_DMA_xfer_done(uint8_t axis)
 void process_input_step(uint8_t axis)
 {
   static uint64_t t = 0;
+
+  __HAL_GPIO_EXTI_CLEAR_IT(saAxisStepInputs[axis].PIN);
 
   // more steps to output
   ++auqSteps[axis];

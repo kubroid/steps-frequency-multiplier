@@ -171,10 +171,11 @@ void SysTick_Handler(void)
 void EXTI0_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI0_IRQn 0 */
-
+#if 0
   /* USER CODE END EXTI0_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
   /* USER CODE BEGIN EXTI0_IRQn 1 */
+#endif
   process_input_step(0);
   /* USER CODE END EXTI0_IRQn 1 */
 }
@@ -185,10 +186,11 @@ void EXTI0_IRQHandler(void)
 void EXTI1_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI1_IRQn 0 */
-
+#if 0
   /* USER CODE END EXTI1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
   /* USER CODE BEGIN EXTI1_IRQn 1 */
+#endif
   process_input_step(1);
   /* USER CODE END EXTI1_IRQn 1 */
 }
@@ -199,10 +201,11 @@ void EXTI1_IRQHandler(void)
 void EXTI2_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI2_IRQn 0 */
-
+#if 0
   /* USER CODE END EXTI2_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
   /* USER CODE BEGIN EXTI2_IRQn 1 */
+#endif
   process_input_step(2);
   /* USER CODE END EXTI2_IRQn 1 */
 }
@@ -213,10 +216,11 @@ void EXTI2_IRQHandler(void)
 void EXTI3_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI3_IRQn 0 */
-
+#if 0
   /* USER CODE END EXTI3_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_3);
   /* USER CODE BEGIN EXTI3_IRQn 1 */
+#endif
   process_input_step(3);
   /* USER CODE END EXTI3_IRQn 1 */
 }
@@ -227,10 +231,11 @@ void EXTI3_IRQHandler(void)
 void EXTI4_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI4_IRQn 0 */
-
+#if 0
   /* USER CODE END EXTI4_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
   /* USER CODE BEGIN EXTI4_IRQn 1 */
+#endif
   process_input_step(4);
   /* USER CODE END EXTI4_IRQn 1 */
 }
@@ -241,10 +246,12 @@ void EXTI4_IRQHandler(void)
 void DMA1_Stream0_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
-
+  UNUSED(hdma_tim4_ch1);
+#if 0
   /* USER CODE END DMA1_Stream0_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim4_ch1);
   /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
+#endif
   on_axis_DMA_xfer_done(2);
   /* USER CODE END DMA1_Stream0_IRQn 1 */
 }
@@ -255,10 +262,12 @@ void DMA1_Stream0_IRQHandler(void)
 void DMA1_Stream2_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Stream2_IRQn 0 */
-
+  UNUSED(hdma_tim5_ch1);
+#if 0
   /* USER CODE END DMA1_Stream2_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim5_ch1);
   /* USER CODE BEGIN DMA1_Stream2_IRQn 1 */
+#endif
   on_axis_DMA_xfer_done(3);
   /* USER CODE END DMA1_Stream2_IRQn 1 */
 }
@@ -288,10 +297,12 @@ void EXTI9_5_IRQHandler(void)
 void DMA1_Stream7_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Stream7_IRQn 0 */
-
+  UNUSED(hdma_tim3_ch3);
+#if 0
   /* USER CODE END DMA1_Stream7_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim3_ch3);
   /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
+#endif
   on_axis_DMA_xfer_done(1);
   /* USER CODE END DMA1_Stream7_IRQn 1 */
 }
@@ -302,10 +313,12 @@ void DMA1_Stream7_IRQHandler(void)
 void DMA2_Stream1_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */
-
+  UNUSED(hdma_tim1_ch1);
+#if 0
   /* USER CODE END DMA2_Stream1_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim1_ch1);
   /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
+#endif
   on_axis_DMA_xfer_done(0);
   /* USER CODE END DMA2_Stream1_IRQn 1 */
 }
@@ -316,10 +329,12 @@ void DMA2_Stream1_IRQHandler(void)
 void DMA2_Stream7_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA2_Stream7_IRQn 0 */
-
+  UNUSED(hdma_tim8_ch4_trig_com);
+#if 0
   /* USER CODE END DMA2_Stream7_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim8_ch4_trig_com);
   /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
+#endif
   on_axis_DMA_xfer_done(4);
   /* USER CODE END DMA2_Stream7_IRQn 1 */
 }
