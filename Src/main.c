@@ -398,11 +398,8 @@ void static inline stop_axis_timer(uint8_t axis)
 // on axis DMA transfer complete
 void on_axis_DMA_xfer_done(uint8_t axis)
 {
-  if( __HAL_DMA_GET_FLAG(TIM_DMA_H, __HAL_DMA_GET_TC_FLAG_INDEX(TIM_DMA_H)) )
-  {
-    /* Clear the transfer complete flag */
-    __HAL_DMA_CLEAR_FLAG(TIM_DMA_H, __HAL_DMA_GET_TC_FLAG_INDEX(TIM_DMA_H));
-  }
+  /* Clear the transfer complete flag */
+  __HAL_DMA_CLEAR_FLAG(TIM_DMA_H, __HAL_DMA_GET_TC_FLAG_INDEX(TIM_DMA_H));
 
   // we have finished some output
   stop_output(axis);
