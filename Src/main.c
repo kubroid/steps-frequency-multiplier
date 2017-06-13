@@ -250,27 +250,17 @@ uint64_t static inline time_us()
 // setup DMA array values
 void static inline setup_OC_DMA_array()
 {
-  uint8_t uqPeriod = HAL_RCC_GetHCLKFreq()/1000000;
-  uint8_t uqWidth = uqPeriod / (OUT_STEP_MULT*2);
-  uint8_t uqWidthDivLost = uqPeriod % (OUT_STEP_MULT*2);
+  uint32_t clk    = HAL_RCC_GetHCLKFreq();
+  uint32_t width  = clk / (OUT_STEP_MULT*2);
 
-  for ( uint8_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
+  for ( uint32_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
   {
-    if ( uqWidthDivLost )
-    {
-      c += uqWidth + 1;
-      --uqWidthDivLost;
-    }
-    else
-    {
-      c += uqWidth;
-    }
-
-    auhOCDMAVal[i] = c;
+    c += width;
+    auhOCDMAVal[i] = c/1000000;
   }
 
-  auhOCDMAVal[OUT_STEP_MULT*2 - 1] = uqPeriod - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2] = uqPeriod - 2;
+  auhOCDMAVal[OUT_STEP_MULT*2 - 1]  = clk/1000000 - 1;
+  auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
 }
 
 // set axis DIR output pins same as inputs
