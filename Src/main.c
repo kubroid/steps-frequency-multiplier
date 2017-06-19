@@ -56,7 +56,7 @@ DMA_HandleTypeDef hdma_tim4_ch1;
 /* USER CODE BEGIN PV */
 // you can edit these
 #define AXIS_CNT            4 // 1..5
-#define OUT_STEP_MULT       10 // 1..84
+#define OUT_STEP_MULT       8 // 1..84
 
 
 // don't touch these
@@ -79,7 +79,7 @@ const struct AXIS_TIM_t aTim[] = {
   {&htim3, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
   {&htim4, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
 };
-/////////////////////////////////////////////////////////////////////////////////////////////
+
 volatile uint32_t auwPresc[AXIS_CNT] = {0};
 volatile uint32_t auwPeriod[AXIS_CNT] = {0};
 volatile uint64_t aulTime[AXIS_CNT] = {0};
@@ -173,7 +173,11 @@ void static inline stop_axis_timer(uint8_t axis);
 #define BUF_IN_POS    auqBufAddPos[axis]
 #define BUF_OUT_TYPE  aBuf[axis][BUF_OUT_POS].uqType
 #define BUF_OUT_TIME  aBuf[axis][BUF_OUT_POS].uhTime
-#define BUF_OUT_POS   auqBufOutPos [axis]
+#define BUF_OUT_POS   auqBufOutPos[axis]
+#define DIR_OUT       saAxisDirOutputs[axis]
+#define DIR_INP       saAxisDirInputs[axis]
+#define STEP_OUT      saAxisStepOutputs[axis]
+#define STEP_INP      saAxisStepInputs[axis]
 
 
 
@@ -189,10 +193,10 @@ void static inline add2buf_step(uint8_t axis, uint16_t time)
   if ( !output(axis) ) start_output(axis);
 }
 
-void static inline add2buf_dir(uint8_t axis)
+void static inline add2buf_dir(uint8_t axis, GPIO_PinState dir)
 {
   BUF_IN_TYPE = 1; // 1 = DIR
-  BUF_IN_TIME = 1;
+  BUF_IN_TIME = (uint16_t)dir;
   ++BUF_IN_POS;
 
   // start output if needed
@@ -263,19 +267,6 @@ void static inline setup_OC_DMA_array()
   auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
 }
 
-// set axis DIR output pins same as inputs
-void static inline setup_out_pins()
-{
-  for ( uint8_t axis = AXIS_CNT; axis--; )
-  {
-    // out pin state = input pin state
-    HAL_GPIO_WritePin(
-      saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN,
-      HAL_GPIO_ReadPin(saAxisDirInputs[axis].PORT, saAxisDirInputs[axis].PIN)
-    );
-  }
-}
-
 // setup all out timers
 void static inline setup_out_timers()
 {
@@ -306,7 +297,7 @@ void static inline start_output(uint8_t axis)
   // if we need just a DIR change
   while ( need2output(axis) && need2output_dir(axis) )
   {
-    HAL_GPIO_TogglePin(saAxisDirOutputs[axis].PORT, saAxisDirOutputs[axis].PIN);
+    HAL_GPIO_WritePin(DIR_OUT.PORT, DIR_OUT.PIN, BUF_OUT_TIME);
     goto_next_out_pos(axis);
   }
 
@@ -405,7 +396,7 @@ void process_input_step(uint8_t axis)
 {
   static uint64_t t = 0;
 
-  __HAL_GPIO_EXTI_CLEAR_IT(saAxisStepInputs[axis].PIN);
+  __HAL_GPIO_EXTI_CLEAR_IT(STEP_INP.PIN);
 
   // more steps to output
   ++auqSteps[axis];
@@ -450,9 +441,9 @@ void process_input_dirs()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    if ( __HAL_GPIO_EXTI_GET_IT(saAxisDirInputs[axis].PIN) )
+    if ( __HAL_GPIO_EXTI_GET_IT(DIR_INP.PIN) )
     {
-      __HAL_GPIO_EXTI_CLEAR_IT(saAxisDirInputs[axis].PIN);
+      __HAL_GPIO_EXTI_CLEAR_IT(DIR_INP.PIN);
 
       // if we have just 1 step while axis was moving
       if ( auq1stStep[axis] )
@@ -465,7 +456,7 @@ void process_input_dirs()
       auhWaiting[axis] = 0; // don't wait for the next step
 
       // add DIR to the output buffer
-      add2buf_dir(axis);
+      add2buf_dir(axis, HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN));
     }
   }
 }
@@ -514,6 +505,10 @@ void process_sys_tick()
 #undef BUF_OUT_TYPE
 #undef BUF_OUT_TIME
 #undef BUF_OUT_POS
+#undef DIR_OUT
+#undef DIR_INP
+#undef STEP_OUT
+#undef STEP_INP
 
 /* USER CODE END 0 */
 
@@ -554,7 +549,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   setup_counter();
   setup_OC_DMA_array();
-  setup_out_pins();
   setup_out_timers();
   /* USER CODE END 2 */
 
