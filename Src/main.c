@@ -468,24 +468,37 @@ void process_sys_tick()
 
   for ( axis = AXIS_CNT; axis--; )
   {
-    // if we waiting for the next step
-    if ( auqMoving[axis] && auhWaiting[axis] )
+    // if axis is moving
+    if ( auqMoving[axis] )
     {
-      --auhWaiting[axis]; // decrease waiting time
-
-      // if wait time is over
-      if ( !auhWaiting[axis] )
+      // if we waiting for the next step
+      if ( auhWaiting[axis] )
       {
-        // if we have just 1 step while axis was moving
-        if ( auq1stStep[axis] )
-        {
-          auq1stStep[axis] = 0; // "1st axis step" flag reset
-          add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
-        }
+        --auhWaiting[axis]; // decrease waiting time
 
-        auqMoving[axis] = 0; // axis isn't moving now
-        auhWaiting[axis] = 0; // don't wait for the next step
+        // if wait time is over
+        if ( !auhWaiting[axis] )
+        {
+          // if we have just 1 step while axis was moving
+          if ( auq1stStep[axis] )
+          {
+            auq1stStep[axis] = 0; // "1st axis step" flag reset
+            add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
+          }
+
+          auqMoving[axis] = 0; // axis isn't moving now
+          auhWaiting[axis] = 0; // don't wait for the next step
+        }
       }
+    }
+    // if axis is not moving
+    else
+    {
+      // force axis DIR input/output sync
+      HAL_GPIO_WritePin(
+        DIR_OUT.PORT, DIR_OUT.PIN,
+        HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN)
+      );
     }
   }
 }
