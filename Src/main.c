@@ -196,7 +196,7 @@ void static inline add2buf_step(uint8_t axis, uint16_t time)
 void static inline add2buf_dir(uint8_t axis, GPIO_PinState dir)
 {
   BUF_IN_TYPE = 1; // 1 = DIR
-  BUF_IN_TIME = (uint16_t)dir;
+  BUF_IN_TIME = 1 + (uint16_t)dir;
   ++BUF_IN_POS;
 
   // start output if needed
@@ -297,7 +297,7 @@ void static inline start_output(uint8_t axis)
   // if we need just a DIR change
   while ( need2output(axis) && need2output_dir(axis) )
   {
-    HAL_GPIO_WritePin(DIR_OUT.PORT, DIR_OUT.PIN, BUF_OUT_TIME);
+    HAL_GPIO_WritePin(DIR_OUT.PORT, DIR_OUT.PIN, (GPIO_PinState)(BUF_OUT_TIME - 1));
     goto_next_out_pos(axis);
   }
 
