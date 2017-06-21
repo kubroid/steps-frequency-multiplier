@@ -37,8 +37,8 @@
 
 /* USER CODE BEGIN 0 */
 void process_input_step(uint8_t axis);
-void process_input_dirs();
-void process_sys_tick();
+void process_input_dir();
+void process_tim_update(TIM_HandleTypeDef* htim);
 void on_axis_DMA_xfer_done(uint8_t axis);
 /* USER CODE END 0 */
 
@@ -117,21 +117,6 @@ void UsageFault_Handler(void)
   /* USER CODE BEGIN UsageFault_IRQn 1 */
 
   /* USER CODE END UsageFault_IRQn 1 */
-}
-
-/**
-* @brief This function handles System tick timer.
-*/
-void SysTick_Handler(void)
-{
-  /* USER CODE BEGIN SysTick_IRQn 0 */
-
-  /* USER CODE END SysTick_IRQn 0 */
-  HAL_IncTick();
-  HAL_SYSTICK_IRQHandler();
-  /* USER CODE BEGIN SysTick_IRQn 1 */
-  process_sys_tick();
-  /* USER CODE END SysTick_IRQn 1 */
 }
 
 /******************************************************************************/
@@ -311,7 +296,7 @@ void EXTI9_5_IRQHandler(void)
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_9);
   /* USER CODE BEGIN EXTI9_5_IRQn 1 */
 #endif
-  process_input_dirs();
+  process_input_dir();
   /* USER CODE END EXTI9_5_IRQn 1 */
 }
 
@@ -321,11 +306,12 @@ void EXTI9_5_IRQHandler(void)
 void TIM2_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM2_IRQn 0 */
-
+#if 0
   /* USER CODE END TIM2_IRQn 0 */
   HAL_TIM_IRQHandler(&htim2);
   /* USER CODE BEGIN TIM2_IRQn 1 */
-
+#endif
+  process_tim_update(&htim2);
   /* USER CODE END TIM2_IRQn 1 */
 }
 
@@ -335,11 +321,12 @@ void TIM2_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM3_IRQn 0 */
-
+#if 0
   /* USER CODE END TIM3_IRQn 0 */
   HAL_TIM_IRQHandler(&htim3);
   /* USER CODE BEGIN TIM3_IRQn 1 */
-
+#endif
+  process_tim_update(&htim3);
   /* USER CODE END TIM3_IRQn 1 */
 }
 

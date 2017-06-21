@@ -56,46 +56,37 @@ DMA_HandleTypeDef hdma_tim3_ch4_up;
 // you can edit these
 #define AXIS_CNT            5 // 1..5
 #define OUT_STEP_MULT       8
-#define IN_MAX_FREQ         50 // kHz
+#define IN_MAX_FREQ         20000 // Hz
 
 
 // don't touch these
-#define MAX_PERIOD_MULT     10
-#define MAX_WAIT_TIME       65 // ms
-#define MIN_WAIT_TIME       3 // ms
+#define OUT_TIM_PERIOD      0xFFFF
 #define OUT_BUF_SIZE        256
 
 
-struct AXIS_TIM_t
+struct AXIS_OUT_DATA_t
 {
-  TIM_HandleTypeDef*  h;
-  uint32_t            uwChannel;
-  uint32_t            uwDMAID;
-  uint32_t            uwDMASRC;
+  TIM_HandleTypeDef*  hTim;
+  uint32_t            uwTimCh;
+  uint32_t            uwTimChCCIT;
+  uint32_t            uwTimDMAID;
+  uint32_t            uwTimDMASrc;
 };
-const struct AXIS_TIM_t aTim[] = {
-  {&htim2, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
-  {&htim2, TIM_CHANNEL_2, TIM_DMA_ID_CC2, TIM_DMA_CC2},
-  {&htim2, TIM_CHANNEL_3, TIM_DMA_ID_CC3, TIM_DMA_CC3},
-  {&htim3, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
-  {&htim3, TIM_CHANNEL_4, TIM_DMA_ID_CC4, TIM_DMA_CC4}
+const struct AXIS_OUT_DATA_t aOut[] = {
+  {&htim2, TIM_CHANNEL_1, TIM_IT_CC1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
+  {&htim2, TIM_CHANNEL_2, TIM_IT_CC2, TIM_DMA_ID_CC2, TIM_DMA_CC2},
+  {&htim2, TIM_CHANNEL_3, TIM_IT_CC3, TIM_DMA_ID_CC3, TIM_DMA_CC3},
+  {&htim3, TIM_CHANNEL_1, TIM_IT_CC1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
+  {&htim3, TIM_CHANNEL_4, TIM_IT_CC4, TIM_DMA_ID_CC4, TIM_DMA_CC4}
 };
 
-volatile uint32_t auwPresc[AXIS_CNT] = {0};
 volatile uint32_t auwPeriod[AXIS_CNT] = {0};
-volatile uint64_t aulTime[AXIS_CNT] = {0};
+volatile uint16_t auhTimCnt[AXIS_CNT] = {0};
 
 volatile uint8_t auqMoving[AXIS_CNT] = {0};
-volatile uint16_t auhWaiting[AXIS_CNT] = {0};
+volatile uint8_t aqWaiting[AXIS_CNT] = {0};
 volatile uint8_t auq1stStep[AXIS_CNT] = {0};
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
-
-volatile uint8_t auqSteps[AXIS_CNT] = {0};
-
-volatile uint32_t uwSysTickClk = 0;
-volatile uint32_t uwSysTimeDivUS = 0;
-
-uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
 
 struct OUT_BUF_t
 {
@@ -105,6 +96,8 @@ struct OUT_BUF_t
 volatile struct OUT_BUF_t aBuf[AXIS_CNT][OUT_BUF_SIZE] = {{{0}}};
 volatile uint8_t auqBufOutPos[AXIS_CNT] = {0};
 volatile uint8_t auqBufAddPos[AXIS_CNT] = {0};
+
+volatile uint16_t auhDMA[AXIS_CNT][2*OUT_STEP_MULT] = {{0}};
 
 struct PORT_PIN_t
 {
@@ -153,18 +146,17 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void static inline start_output(uint8_t axis);
 void static inline stop_output(uint8_t axis);
 uint8_t static inline output(uint8_t axis);
-void static inline start_axis_timer(uint8_t axis);
-void static inline stop_axis_timer(uint8_t axis);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
 
-#define TIM_DMA_H     aTim[axis].h->hdma[aTim[axis].uwDMAID]
-#define TIM_DMA       aTim[axis].h->hdma[aTim[axis].uwDMAID]->Instance
-#define TIM_H         aTim[axis].h
-#define TIM_CH        aTim[axis].uwChannel
-#define TIM_DMA_SRC   aTim[axis].uwDMASRC
-#define TIM           aTim[axis].h->Instance
+#define TIM_DMA_H     aOut[axis].hTim->hdma[aOut[axis].uwTimDMAID]
+#define TIM_DMA       aOut[axis].hTim->hdma[aOut[axis].uwTimDMAID]->Instance
+#define TIM_H         aOut[axis].hTim
+#define TIM_CH        aOut[axis].uwTimCh
+#define TIM_CH_CC_IT  aOut[axis].uwTimChCCIT
+#define TIM_DMA_SRC   aOut[axis].uwTimDMASrc
+#define TIM           aOut[axis].hTim->Instance
 #define BUF_IN_TYPE   aBuf[axis][BUF_IN_POS].uqType
 #define BUF_IN_TIME   aBuf[axis][BUF_IN_POS].uhTime
 #define BUF_IN_POS    auqBufAddPos[axis]
@@ -216,71 +208,40 @@ uint8_t static inline need2output_dir(uint8_t axis)
   return BUF_OUT_TYPE;
 }
 
-uint16_t static inline out_presc(uint8_t axis)
-{
-  auwPresc[axis] = BUF_OUT_TIME - (auqSteps[axis]/2);
-
-  return auwPresc[axis];
-}
-
-void static inline tim_update(uint8_t axis)
-{
-  TIM->EGR |= TIM_EGR_UG; // update event
-  TIM->SR  &= ~TIM_SR_UIF; // reset update flag
-}
-
-// get timestamp in US since system startup
-// value is overloaded after 49.71 days (256*256*256*256 ms)
-uint64_t static inline time_us()
-{
-  static uint64_t t[2] = {0};
-
-  t[0] = t[1];
-  t[1] = HAL_GetTick()*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
-
-  return t[0] < t[1] ?
-    t[1] :
-    t[1] + 1000 ;
-}
-
 
 
 
 // --- SETUP ---
 
-// setup DMA array values
-void static inline setup_OC_DMA_array()
-{
-  uint32_t clk    = HAL_RCC_GetHCLKFreq();
-  uint32_t width  = clk / (OUT_STEP_MULT*2);
-
-  for ( uint32_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
-  {
-    c += width;
-    auhOCDMAVal[i] = c/1000000;
-  }
-
-  auhOCDMAVal[OUT_STEP_MULT*2 - 1]  = clk/1000000 - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
-}
-
 // setup all out timers
 void static inline setup_out_timers()
 {
+  uint16_t presc = HAL_RCC_GetHCLKFreq() / IN_MAX_FREQ / 2 / OUT_STEP_MULT;
+
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
+    // set default prescaler
+    __HAL_TIM_SET_PRESCALER(TIM_H, presc);
     // set default period
-    __HAL_TIM_SET_AUTORELOAD( TIM_H, (HAL_RCC_GetHCLKFreq()/1000000 - 1) );
-    // generate an update event to reload the Period
-    tim_update(axis);
-  }
-}
+    __HAL_TIM_SET_AUTORELOAD(TIM_H, OUT_TIM_PERIOD);
+    // generate an update event to reload the prescaler
+    TIM->EGR |= TIM_EGR_UG; // update event
+    TIM->SR  &= ~TIM_SR_UIF; // reset update flag
 
-// setup counter data
-void static inline setup_counter()
-{
-  uwSysTickClk = HAL_RCC_GetHCLKFreq()/1000;
-  uwSysTimeDivUS = HAL_RCC_GetHCLKFreq()/1000000;
+    /* Enable the TIM Update interrupt */
+    __HAL_TIM_ENABLE_IT(TIM_H, TIM_IT_UPDATE);
+    /* Enable the TIM Capture/Compare interrupt */
+    __HAL_TIM_ENABLE_IT(TIM_H, TIM_CH_CC_IT);
+
+    /* Disable the Output compare channel */
+    TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
+
+    /* Enable the main output */
+    if ( IS_TIM_BREAK_INSTANCE(TIM) ) __HAL_TIM_MOE_ENABLE(TIM_H);
+
+    /* Enable the Peripheral */
+    __HAL_TIM_ENABLE(TIM_H);
+  }
 }
 
 
@@ -291,6 +252,9 @@ void static inline setup_counter()
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
+  static uint16_t t = 0;
+  static uint16_t p = 0;
+
   // if we need just a DIR change
   while ( need2output(axis) && need2output_dir(axis) )
   {
@@ -301,8 +265,39 @@ void static inline start_output(uint8_t axis)
   // exit if nothing to output
   if ( !need2output(axis) ) return;
 
-  // start output generation
-  start_axis_timer(axis);
+
+
+
+  // update the DMA array
+  t = BUF_OUT_TIME / (2*OUT_STEP_MULT);
+  auhDMA[axis][2*OUT_STEP_MULT - 1] = TIM->CNT + BUF_OUT_TIME + t;
+
+  for ( p = 2*OUT_STEP_MULT - 1; p--; )
+  {
+    auhDMA[axis][p] = auhDMA[axis][p+1] - t;
+  }
+
+  // set timer's value for comparing
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhDMA[axis][0]);
+  /* Disable the peripheral */
+  __HAL_DMA_DISABLE(TIM_DMA_H);
+  /* Configure DMA Channel data length */
+  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT);
+  /* Configure DMA Channel destination address */
+  TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
+  /* Configure DMA Channel source address */
+  TIM_DMA->CMAR = (uint32_t)&(auhDMA[axis][1]);
+  /* Enable the transfer complete interrupt */
+  __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
+  /* Enable the Peripheral */
+  __HAL_DMA_ENABLE(TIM_DMA_H);
+  /* Enable the TIM Capture/Compare DMA request */
+  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
+  /* Enable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+
+
+
 
   // output is enabled
   auqOutputOn[axis] = 1;
@@ -311,14 +306,16 @@ void static inline start_output(uint8_t axis)
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  // start output generation
-  stop_axis_timer(axis);
+  /* Disable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
+
+
+
+
   // +1 to the current out pos
   goto_next_out_pos(axis);
   // output is disabled
   auqOutputOn[axis] = 0;
-  // less steps to output
-  --auqSteps[axis];
   // start output if needed
   if ( need2output(axis) ) start_output(axis);
 }
@@ -328,49 +325,6 @@ uint8_t static inline output(uint8_t axis)
 {
   // return output state
   return auqOutputOn[axis];
-}
-
-void static inline start_axis_timer(uint8_t axis)
-{
-  // set timer's prescaler
-  __HAL_TIM_SET_PRESCALER(TIM_H, out_presc(axis));
-  // generate an update event to apply timer's data
-  tim_update(axis);
-  // set timer's value for comparing
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
-
-  /* Disable the peripheral */
-  __HAL_DMA_DISABLE(TIM_DMA_H);
-  /* Configure DMA Channel data length */
-  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT);
-  /* Configure DMA Channel destination address */
-  TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
-  /* Configure DMA Channel source address */
-  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal[1];
-  /* Enable the transfer complete interrupt */
-  __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
-  /* Enable the Half transfer complete interrupt */
-   /* Enable the Peripheral */
-  __HAL_DMA_ENABLE(TIM_DMA_H);
-
-  /* Enable the TIM Capture/Compare DMA request */
-  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
-  /* Enable the Output compare channel */
-  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
-
-  /* Enable the main output */
-  if(IS_TIM_BREAK_INSTANCE(TIM) != RESET)
-  {
-    __HAL_TIM_MOE_ENABLE(TIM_H);
-  }
-  /* Enable the Peripheral */
-  __HAL_TIM_ENABLE(TIM_H);
-}
-
-void static inline stop_axis_timer(uint8_t axis)
-{
-  // disable timer
-  aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
 }
 
 // on axis DMA transfer complete
@@ -395,22 +349,22 @@ void process_input_step(uint8_t axis)
 
   __HAL_GPIO_EXTI_CLEAR_IT(STEP_INP.PIN);
 
-  // more steps to output
-  ++auqSteps[axis];
+  // set max wait time for the next step
+  aqWaiting[axis] = 2;
 
   // if axis isn't moving
   if ( !auqMoving[axis] )
   {
-    aulTime[axis] = time_us(); // save step time
+    auhTimCnt[axis] = TIM->CNT; // save step time
     auqMoving[axis] = 1; // axis is moving now
     auq1stStep[axis] = 1; // it's 1st step after axis move start
-    auhWaiting[axis] = MAX_WAIT_TIME; // set max wait time for the next step
   }
-  else // axis is moving
+  // axis is moving
+  else
   {
-    t = time_us(); // get step time
-    auwPeriod[axis] = t - aulTime[axis]; // calculate the period between 2 input steps
-    aulTime[axis] = t; // save step time
+    t = TIM->CNT; // get step time
+    auwPeriod[axis] = t - auhTimCnt[axis]; // calculate the period between 2 input steps
+    auhTimCnt[axis] = t; // save step time
 
     // if now we have just 2 steps after axis move start
     if ( auq1stStep[axis] )
@@ -424,15 +378,11 @@ void process_input_step(uint8_t axis)
     {
       add2buf_step(axis, auwPeriod[axis]); // add step to the buffer
     }
-
-    // set new waiting time for the next step
-    auhWaiting[axis] = MIN_WAIT_TIME + (auwPeriod[axis] * MAX_PERIOD_MULT)/1000;
-    if ( auhWaiting[axis] > MAX_WAIT_TIME ) auhWaiting[axis] = MAX_WAIT_TIME;
   }
 }
 
 // on EXTI 5-9 input
-void process_input_dirs()
+void process_input_dir()
 {
   static uint8_t axis = 0;
 
@@ -446,11 +396,11 @@ void process_input_dirs()
       if ( auq1stStep[axis] )
       {
         auq1stStep[axis] = 0; // "1st axis step" flag reset
-        add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
+        add2buf_step(axis, TIM->CNT - auhTimCnt[axis]); // add step to the buffer
       }
 
       auqMoving[axis] = 0; // axis isn't moving now
-      auhWaiting[axis] = 0; // don't wait for the next step
+      aqWaiting[axis] = 0; // don't wait for the next step
 
       // add DIR to the output buffer
       add2buf_dir(axis, HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN));
@@ -458,44 +408,49 @@ void process_input_dirs()
   }
 }
 
-// on sys tick (every 1000us)
-void process_sys_tick()
+//
+void process_tim_update(TIM_HandleTypeDef* htim)
 {
   static uint8_t axis = 0;
 
+  __HAL_TIM_CLEAR_IT(htim, TIM_IT_UPDATE);
+
   for ( axis = AXIS_CNT; axis--; )
   {
-    // if axis is moving
-    if ( auqMoving[axis] )
+    if ( htim == TIM_H )
     {
-      // if we waiting for the next step
-      if ( auhWaiting[axis] )
+      // if axis is moving
+      if ( auqMoving[axis] )
       {
-        --auhWaiting[axis]; // decrease waiting time
-
-        // if wait time is over
-        if ( !auhWaiting[axis] )
+        // if we waiting for the next step
+        if ( aqWaiting[axis] )
         {
-          // if we have just 1 step while axis was moving
-          if ( auq1stStep[axis] )
-          {
-            auq1stStep[axis] = 0; // "1st axis step" flag reset
-            add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
-          }
+          --aqWaiting[axis]; // decrease waiting time
 
-          auqMoving[axis] = 0; // axis isn't moving now
-          auhWaiting[axis] = 0; // don't wait for the next step
+          // if wait time is over
+          if ( !aqWaiting[axis] )
+          {
+            // if we have just 1 step while axis was moving
+            if ( auq1stStep[axis] )
+            {
+              auq1stStep[axis] = 0; // "1st axis step" flag reset
+              add2buf_step(axis, OUT_TIM_PERIOD); // add step to the buffer
+            }
+
+            auqMoving[axis] = 0; // axis isn't moving now
+            aqWaiting[axis] = 0; // don't wait for the next step
+          }
         }
       }
-    }
-    // if axis is not moving
-    else
-    {
-      // force axis DIR input/output sync
-      HAL_GPIO_WritePin(
-        DIR_OUT.PORT, DIR_OUT.PIN,
-        HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN)
-      );
+      // if axis is not moving
+      else
+      {
+        // force axis DIR input/output sync
+        HAL_GPIO_WritePin(
+          DIR_OUT.PORT, DIR_OUT.PIN,
+          HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN)
+        );
+      }
     }
   }
 }
@@ -507,6 +462,7 @@ void process_sys_tick()
 #undef TIM_DMA
 #undef TIM_H
 #undef TIM_CH
+#undef TIM_CH_CC_IT
 #undef TIM_DMA_SRC
 #undef TIM
 #undef BUF_IN_TYPE
@@ -555,8 +511,6 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
-  setup_counter();
-  setup_OC_DMA_array();
   setup_out_timers();
   /* USER CODE END 2 */
 
