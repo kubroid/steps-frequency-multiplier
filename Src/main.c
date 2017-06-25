@@ -60,7 +60,7 @@ DMA_HandleTypeDef hdma_tim3_ch4_up;
 
 
 // don't touch these
-#define OUT_TIM_PERIOD      0xFFFF
+#define OUT_TIM_PERIOD      (0xFFFF-1)
 #define OUT_BUF_SIZE        256
 
 
@@ -97,7 +97,7 @@ volatile struct OUT_BUF_t aBuf[AXIS_CNT][OUT_BUF_SIZE] = {{{0}}};
 volatile uint8_t auqBufOutPos[AXIS_CNT] = {0};
 volatile uint8_t auqBufAddPos[AXIS_CNT] = {0};
 
-volatile uint16_t auhDMA[AXIS_CNT][2*OUT_STEP_MULT] = {{0}};
+volatile uint16_t auhDMA[AXIS_CNT][2*OUT_STEP_MULT + 1] = {{0}};
 
 struct PORT_PIN_t
 {
@@ -175,7 +175,7 @@ uint8_t static inline output(uint8_t axis);
 void static inline add2buf_step(uint8_t axis, uint16_t time)
 {
   BUF_IN_TYPE = 0; // 0 = STEP
-  BUF_IN_TIME = time;
+  BUF_IN_TIME = time*90/100;
   ++BUF_IN_POS;
 
   // start output if needed
@@ -216,10 +216,13 @@ uint8_t static inline need2output_dir(uint8_t axis)
 // setup all out timers
 void static inline setup_out_timers()
 {
-  uint16_t presc = HAL_RCC_GetHCLKFreq() / IN_MAX_FREQ / 2 / OUT_STEP_MULT;
+  uint16_t presc = HAL_RCC_GetHCLKFreq() / IN_MAX_FREQ / 2 / OUT_STEP_MULT - 1;
 
   for ( uint8_t axis = AXIS_CNT; axis--; )
   {
+    // set last value for the timer's channel OC
+    auhDMA[axis][2*OUT_STEP_MULT] = 0xFFFF;
+
     // set default prescaler
     __HAL_TIM_SET_PRESCALER(TIM_H, presc);
     // set default period
@@ -230,11 +233,11 @@ void static inline setup_out_timers()
 
     /* Enable the TIM Update interrupt */
     __HAL_TIM_ENABLE_IT(TIM_H, TIM_IT_UPDATE);
+
     /* Enable the TIM Capture/Compare interrupt */
     __HAL_TIM_ENABLE_IT(TIM_H, TIM_CH_CC_IT);
-
-    /* Disable the Output compare channel */
-    TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
+    /* Enable the Output compare channel */
+    TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
 
     /* Enable the main output */
     if ( IS_TIM_BREAK_INSTANCE(TIM) ) __HAL_TIM_MOE_ENABLE(TIM_H);
@@ -293,8 +296,6 @@ void static inline start_output(uint8_t axis)
   __HAL_DMA_ENABLE(TIM_DMA_H);
   /* Enable the TIM Capture/Compare DMA request */
   __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
-  /* Enable the Output compare channel */
-  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
 
 
 
@@ -306,12 +307,6 @@ void static inline start_output(uint8_t axis)
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
-  /* Disable the Output compare channel */
-  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_DISABLE);
-
-
-
-
   // +1 to the current out pos
   goto_next_out_pos(axis);
   // output is disabled
@@ -409,11 +404,9 @@ void process_input_dir()
 }
 
 //
-void process_tim_update(TIM_HandleTypeDef* htim)
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
   static uint8_t axis = 0;
-
-  __HAL_TIM_CLEAR_IT(htim, TIM_IT_UPDATE);
 
   for ( axis = AXIS_CNT; axis--; )
   {
@@ -438,7 +431,6 @@ void process_tim_update(TIM_HandleTypeDef* htim)
             }
 
             auqMoving[axis] = 0; // axis isn't moving now
-            aqWaiting[axis] = 0; // don't wait for the next step
           }
         }
       }
@@ -657,7 +649,7 @@ static void MX_TIM2_Init(void)
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 0xFFFF;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
@@ -716,7 +708,7 @@ static void MX_TIM3_Init(void)
   }
 
   sConfigOC.OCMode = TIM_OCMODE_TOGGLE;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 0xFFFF;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
