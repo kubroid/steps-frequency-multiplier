@@ -55,8 +55,9 @@ DMA_HandleTypeDef hdma_tim4_ch1;
 
 /* USER CODE BEGIN PV */
 // you can edit these
-#define AXIS_CNT            4 // 1..5
-#define OUT_STEP_MULT       8 // 1..84
+#define AXIS_CNT            4 // 1..4
+#define OUT_STEP_MULT       8 // 1..36
+#define IN_STEP_FREQ_MAX    50000 // 20..800000 Hz
 
 
 // don't touch these
@@ -94,7 +95,7 @@ volatile uint8_t auqSteps[AXIS_CNT] = {0};
 volatile uint32_t uwSysTickClk = 0;
 volatile uint32_t uwSysTimeDivUS = 0;
 
-uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
+uint8_t auqOCDMAVal[2*OUT_STEP_MULT*(IN_STEP_FREQ_MAX/1000) + 1] = {0};
 
 struct OUT_BUF_t
 {
@@ -257,14 +258,15 @@ void static inline setup_OC_DMA_array()
   uint32_t clk    = HAL_RCC_GetHCLKFreq();
   uint32_t width  = clk / (OUT_STEP_MULT*2);
 
-  for ( uint32_t i = 0, c = 0; i < (OUT_STEP_MULT*2 - 1); ++i )
+  for ( uint32_t i = 0, c = 0; i < (sizeof(auqOCDMAVal)-1); ++i )
   {
+    if ( !(i % (2*OUT_STEP_MULT)) ) c = 0;
+
     c += width;
-    auhOCDMAVal[i] = c/1000000;
+    auqOCDMAVal[i] = c/1000000 - 1;
   }
 
-  auhOCDMAVal[OUT_STEP_MULT*2 - 1]  = clk/1000000 - 1;
-  auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
+  auqOCDMAVal[sizeof(auqOCDMAVal)-1] = auqOCDMAVal[sizeof(auqOCDMAVal)-2] - 1;
 }
 
 // setup all out timers
@@ -340,7 +342,7 @@ void static inline start_axis_timer(uint8_t axis)
   // generate an update event to apply timer's data
   tim_update(axis);
   // set timer's value for comparing
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auqOCDMAVal[0]);
 
   /* Disable the peripheral */
   __HAL_DMA_DISABLE(TIM_DMA_H);
@@ -349,7 +351,7 @@ void static inline start_axis_timer(uint8_t axis)
   /* Configure DMA Channel destination address */
   TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
   /* Configure DMA Channel source address */
-  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal[1];
+  TIM_DMA->CMAR = (uint32_t)&auqOCDMAVal[1];
   /* Enable the transfer complete interrupt */
   __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
   /* Enable the Half transfer complete interrupt */
