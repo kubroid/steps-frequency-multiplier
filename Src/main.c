@@ -81,25 +81,18 @@ const struct AXIS_TIM_t aTim[] = {
   {&htim4, TIM_CHANNEL_1, TIM_DMA_ID_CC1, TIM_DMA_CC1},
 };
 
-volatile uint32_t auwPresc[AXIS_CNT] = {0};
-volatile uint32_t auwPeriod[AXIS_CNT] = {0};
-volatile uint64_t aulTime[AXIS_CNT] = {0};
-
+volatile uint16_t auhPresc[AXIS_CNT] = {0};
+volatile uint8_t auqPeriod[AXIS_CNT] = {0};
 volatile uint8_t auqMoving[AXIS_CNT] = {0};
-volatile uint16_t auhWaiting[AXIS_CNT] = {0};
-volatile uint8_t auq1stStep[AXIS_CNT] = {0};
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
-
 volatile uint8_t auqSteps[AXIS_CNT] = {0};
-
-volatile uint32_t uwSysTickClk = 0;
-volatile uint32_t uwSysTimeDivUS = 0;
 
 uint8_t auqOCDMAVal[2*OUT_STEP_MULT*(IN_STEP_FREQ_MAX/1000) + 1] = {0};
 
 struct OUT_BUF_t
 {
   uint8_t   uqType;
+  uint8_t   uqCount;
   uint16_t  uhTime;
 };
 volatile struct OUT_BUF_t aBuf[AXIS_CNT][OUT_BUF_SIZE] = {{{0}}};
@@ -170,9 +163,11 @@ void static inline stop_axis_timer(uint8_t axis);
 #define TIM_DMA_SRC   aTim[axis].uwDMASRC
 #define TIM           aTim[axis].h->Instance
 #define BUF_IN_TYPE   aBuf[axis][BUF_IN_POS].uqType
+#define BUF_IN_CNT    aBuf[axis][BUF_IN_POS].uqCount
 #define BUF_IN_TIME   aBuf[axis][BUF_IN_POS].uhTime
 #define BUF_IN_POS    auqBufAddPos[axis]
 #define BUF_OUT_TYPE  aBuf[axis][BUF_OUT_POS].uqType
+#define BUF_OUT_CNT   aBuf[axis][BUF_OUT_POS].uqCount
 #define BUF_OUT_TIME  aBuf[axis][BUF_OUT_POS].uhTime
 #define BUF_OUT_POS   auqBufOutPos[axis]
 #define DIR_OUT       saAxisDirOutputs[axis]
@@ -184,9 +179,10 @@ void static inline stop_axis_timer(uint8_t axis);
 
 // --- TOOLS ---
 
-void static inline add2buf_step(uint8_t axis, uint16_t time)
+void static inline add2buf_step(uint8_t axis, uint8_t count, uint16_t time)
 {
   BUF_IN_TYPE = 0; // 0 = STEP
+  BUF_IN_CNT = count;
   BUF_IN_TIME = time;
   ++BUF_IN_POS;
 
@@ -222,29 +218,15 @@ uint8_t static inline need2output_dir(uint8_t axis)
 
 uint16_t static inline out_presc(uint8_t axis)
 {
-  auwPresc[axis] = BUF_OUT_TIME - (auqSteps[axis]/2);
+  auhPresc[axis] = BUF_OUT_TIME/BUF_OUT_CNT - 1;
 
-  return auwPresc[axis];
+  return auhPresc[axis];
 }
 
 void static inline tim_update(uint8_t axis)
 {
   TIM->EGR |= TIM_EGR_UG; // update event
   TIM->SR  &= ~TIM_SR_UIF; // reset update flag
-}
-
-// get timestamp in US since system startup
-// value is overloaded after 49.71 days (256*256*256*256 ms)
-uint64_t static inline time_us()
-{
-  static uint64_t t[2] = {0};
-
-  t[0] = t[1];
-  t[1] = HAL_GetTick()*1000 + (uwSysTickClk - SysTick->VAL)/uwSysTimeDivUS;
-
-  return t[0] < t[1] ?
-    t[1] :
-    t[1] + 1000 ;
 }
 
 
@@ -281,13 +263,6 @@ void static inline setup_out_timers()
   }
 }
 
-// setup counter data
-void static inline setup_counter()
-{
-  uwSysTickClk = HAL_RCC_GetHCLKFreq()/1000;
-  uwSysTimeDivUS = HAL_RCC_GetHCLKFreq()/1000000;
-}
-
 
 
 
@@ -322,8 +297,6 @@ void static inline stop_output(uint8_t axis)
   goto_next_out_pos(axis);
   // output is disabled
   auqOutputOn[axis] = 0;
-  // less steps to output
-  --auqSteps[axis];
   // start output if needed
   if ( need2output(axis) ) start_output(axis);
 }
@@ -347,7 +320,7 @@ void static inline start_axis_timer(uint8_t axis)
   /* Disable the peripheral */
   __HAL_DMA_DISABLE(TIM_DMA_H);
   /* Configure DMA Channel data length */
-  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT);
+  TIM_DMA_H->Instance->CNDTR = 2*OUT_STEP_MULT*BUF_OUT_CNT;
   /* Configure DMA Channel destination address */
   TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
   /* Configure DMA Channel source address */
@@ -396,43 +369,14 @@ void on_axis_DMA_xfer_done(uint8_t axis)
 // on EXTI 4-0 input
 void process_input_step(uint8_t axis)
 {
-  static uint64_t t = 0;
-
   __HAL_GPIO_EXTI_CLEAR_IT(STEP_INP.PIN);
 
-  // more steps to output
   ++auqSteps[axis];
 
-  // if axis isn't moving
   if ( !auqMoving[axis] )
   {
-    aulTime[axis] = time_us(); // save step time
-    auqMoving[axis] = 1; // axis is moving now
-    auq1stStep[axis] = 1; // it's 1st step after axis move start
-    auhWaiting[axis] = MAX_WAIT_TIME; // set max wait time for the next step
-  }
-  else // axis is moving
-  {
-    t = time_us(); // get step time
-    auwPeriod[axis] = t - aulTime[axis]; // calculate the period between 2 input steps
-    aulTime[axis] = t; // save step time
-
-    // if now we have just 2 steps after axis move start
-    if ( auq1stStep[axis] )
-    {
-      auq1stStep[axis] = 0; // "1st axis step" flag reset
-      // add 2 steps to the buffer
-      add2buf_step(axis, auwPeriod[axis]/2);
-      add2buf_step(axis, auwPeriod[axis]/2);
-    }
-    else // we have more than 2 steps after axis move start
-    {
-      add2buf_step(axis, auwPeriod[axis]); // add step to the buffer
-    }
-
-    // set new waiting time for the next step
-    auhWaiting[axis] = MIN_WAIT_TIME + (auwPeriod[axis] * MAX_PERIOD_MULT)/1000;
-    if ( auhWaiting[axis] > MAX_WAIT_TIME ) auhWaiting[axis] = MAX_WAIT_TIME;
+    auqMoving[axis] = 1;
+    auqPeriod[axis] = 0;
   }
 }
 
@@ -446,19 +390,20 @@ void process_input_dirs()
     if ( __HAL_GPIO_EXTI_GET_IT(DIR_INP.PIN) )
     {
       __HAL_GPIO_EXTI_CLEAR_IT(DIR_INP.PIN);
-
+#if 0
       // if we have just 1 step while axis was moving
       if ( auq1stStep[axis] )
       {
         auq1stStep[axis] = 0; // "1st axis step" flag reset
-        add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
+        add2buf_step(axis, time_us() - auwTime[axis]); // add step to the buffer
       }
 
       auqMoving[axis] = 0; // axis isn't moving now
-      auhWaiting[axis] = 0; // don't wait for the next step
+      auqWaiting[axis] = 0; // don't wait for the next step
 
       // add DIR to the output buffer
       add2buf_dir(axis, HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN));
+#endif
     }
   }
 }
@@ -473,34 +418,30 @@ void process_sys_tick()
     // if axis is moving
     if ( auqMoving[axis] )
     {
-      // if we waiting for the next step
-      if ( auhWaiting[axis] )
+      ++auqPeriod[axis];
+
+      if ( auqSteps[axis] > 1 )
       {
-        --auhWaiting[axis]; // decrease waiting time
-
-        // if wait time is over
-        if ( !auhWaiting[axis] )
-        {
-          // if we have just 1 step while axis was moving
-          if ( auq1stStep[axis] )
-          {
-            auq1stStep[axis] = 0; // "1st axis step" flag reset
-            add2buf_step(axis, time_us() - aulTime[axis]); // add step to the buffer
-          }
-
-          auqMoving[axis] = 0; // axis isn't moving now
-          auhWaiting[axis] = 0; // don't wait for the next step
-        }
+        add2buf_step(axis, auqSteps[axis], auqPeriod[axis]*1000);
+        auqSteps[axis] = 0;
+      }
+      else if ( auqPeriod[axis] >= MAX_WAIT_TIME )
+      {
+        add2buf_step(axis, auqSteps[axis], auqPeriod[axis]*1000);
+        auqSteps[axis] = 0;
+        auqMoving[axis] = 0;
       }
     }
     // if axis is not moving
     else
     {
+#if 0
       // force axis DIR input/output sync
       HAL_GPIO_WritePin(
         DIR_OUT.PORT, DIR_OUT.PIN,
         HAL_GPIO_ReadPin(DIR_INP.PORT, DIR_INP.PIN)
       );
+#endif
     }
   }
 }
@@ -515,9 +456,11 @@ void process_sys_tick()
 #undef TIM_DMA_SRC
 #undef TIM
 #undef BUF_IN_TYPE
+#undef BUF_IN_CNT
 #undef BUF_IN_TIME
 #undef BUF_IN_POS
 #undef BUF_OUT_TYPE
+#undef BUF_OUT_CNT
 #undef BUF_OUT_TIME
 #undef BUF_OUT_POS
 #undef DIR_OUT
@@ -562,7 +505,6 @@ int main(void)
   MX_NVIC_Init();
 
   /* USER CODE BEGIN 2 */
-  setup_counter();
   setup_OC_DMA_array();
   setup_out_timers();
   /* USER CODE END 2 */
