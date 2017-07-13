@@ -87,7 +87,7 @@ volatile uint8_t auqMoving[AXIS_CNT] = {0};
 volatile uint8_t auqOutputOn[AXIS_CNT] = {0};
 volatile uint8_t auqSteps[AXIS_CNT] = {0};
 
-uint8_t auqOCDMAVal[2*OUT_STEP_MULT*(IN_STEP_FREQ_MAX/1000) + 1] = {0};
+uint16_t auhOCDMAVal[2*OUT_STEP_MULT*(IN_STEP_FREQ_MAX/1000) + 1] = {0};
 
 struct OUT_BUF_t
 {
@@ -162,14 +162,14 @@ void static inline stop_axis_timer(uint8_t axis);
 #define TIM_CH        aTim[axis].uwChannel
 #define TIM_DMA_SRC   aTim[axis].uwDMASRC
 #define TIM           aTim[axis].h->Instance
+#define BUF_IN_POS    auqBufAddPos[axis]
 #define BUF_IN_TYPE   aBuf[axis][BUF_IN_POS].uqType
 #define BUF_IN_CNT    aBuf[axis][BUF_IN_POS].uqCount
 #define BUF_IN_TIME   aBuf[axis][BUF_IN_POS].uhTime
-#define BUF_IN_POS    auqBufAddPos[axis]
+#define BUF_OUT_POS   auqBufOutPos[axis]
 #define BUF_OUT_TYPE  aBuf[axis][BUF_OUT_POS].uqType
 #define BUF_OUT_CNT   aBuf[axis][BUF_OUT_POS].uqCount
 #define BUF_OUT_TIME  aBuf[axis][BUF_OUT_POS].uhTime
-#define BUF_OUT_POS   auqBufOutPos[axis]
 #define DIR_OUT       saAxisDirOutputs[axis]
 #define DIR_INP       saAxisDirInputs[axis]
 #define STEP_OUT      saAxisStepOutputs[axis]
@@ -218,7 +218,7 @@ uint8_t static inline need2output_dir(uint8_t axis)
 
 uint16_t static inline out_presc(uint8_t axis)
 {
-  auhPresc[axis] = BUF_OUT_TIME/BUF_OUT_CNT - 1;
+  auhPresc[axis] = BUF_OUT_TIME;
 
   return auhPresc[axis];
 }
@@ -240,15 +240,15 @@ void static inline setup_OC_DMA_array()
   uint32_t clk    = HAL_RCC_GetHCLKFreq();
   uint32_t width  = clk / (OUT_STEP_MULT*2);
 
-  for ( uint32_t i = 0, c = 0; i < (sizeof(auqOCDMAVal)-1); ++i )
+  for ( uint32_t i = 0, c = 0; i < (2*OUT_STEP_MULT*(IN_STEP_FREQ_MAX/1000)); ++i )
   {
     if ( !(i % (2*OUT_STEP_MULT)) ) c = 0;
 
     c += width;
-    auqOCDMAVal[i] = c/1000000 - 1;
+    auhOCDMAVal[i] = c/1000000 - 1;
   }
 
-  auqOCDMAVal[sizeof(auqOCDMAVal)-1] = auqOCDMAVal[sizeof(auqOCDMAVal)-2] - 1;
+  auhOCDMAVal[sizeof(auhOCDMAVal)-1] = auhOCDMAVal[sizeof(auhOCDMAVal)-2] - 1;
 }
 
 // setup all out timers
@@ -271,13 +271,14 @@ void static inline setup_out_timers()
 // start output for selected axis
 void static inline start_output(uint8_t axis)
 {
+#if 0
   // if we need just a DIR change
   while ( need2output(axis) && need2output_dir(axis) )
   {
     HAL_GPIO_WritePin(DIR_OUT.PORT, DIR_OUT.PIN, (GPIO_PinState)(BUF_OUT_TIME - 1));
     goto_next_out_pos(axis);
   }
-
+#endif
   // exit if nothing to output
   if ( !need2output(axis) ) return;
 
@@ -308,6 +309,7 @@ uint8_t static inline output(uint8_t axis)
   return auqOutputOn[axis];
 }
 
+uint32_t CNDTR[AXIS_CNT] = {0};
 void static inline start_axis_timer(uint8_t axis)
 {
   // set timer's prescaler
@@ -315,19 +317,19 @@ void static inline start_axis_timer(uint8_t axis)
   // generate an update event to apply timer's data
   tim_update(axis);
   // set timer's value for comparing
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auqOCDMAVal[0]);
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
 
   /* Disable the peripheral */
   __HAL_DMA_DISABLE(TIM_DMA_H);
   /* Configure DMA Channel data length */
-  TIM_DMA_H->Instance->CNDTR = 2*OUT_STEP_MULT*BUF_OUT_CNT;
+  CNDTR[axis] = BUF_OUT_CNT*2*OUT_STEP_MULT;
+  TIM_DMA_H->Instance->CNDTR = CNDTR[axis];
   /* Configure DMA Channel destination address */
   TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
   /* Configure DMA Channel source address */
-  TIM_DMA->CMAR = (uint32_t)&auqOCDMAVal[1];
+  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal[1];
   /* Enable the transfer complete interrupt */
   __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
-  /* Enable the Half transfer complete interrupt */
    /* Enable the Peripheral */
   __HAL_DMA_ENABLE(TIM_DMA_H);
 

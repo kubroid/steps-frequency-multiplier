@@ -220,12 +220,10 @@ void DMA1_Channel1_IRQHandler(void)
 void DMA1_Channel2_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel2_IRQn 0 */
-  UNUSED(hdma_tim1_ch1);
-#if 0
+
   /* USER CODE END DMA1_Channel2_IRQn 0 */
   HAL_DMA_IRQHandler(&hdma_tim1_ch1);
   /* USER CODE BEGIN DMA1_Channel2_IRQn 1 */
-#endif
   on_axis_DMA_xfer_done(0);
   /* USER CODE END DMA1_Channel2_IRQn 1 */
 }
