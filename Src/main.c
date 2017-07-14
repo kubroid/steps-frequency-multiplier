@@ -96,9 +96,7 @@ volatile uint32_t uwSysTimeDivUS = 0;
 
 uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
 
-#define MAX_INPUT_FREQ 50 // kHz
-#define DMA_ARRAY_SIZE (MAX_INPUT_FREQ * OUT_STEP_MULT * 2)
-uint16_t auhOCDMAVal_2[DMA_ARRAY_SIZE] = {0};
+uint32_t auhOCDMAVal_2 = 0;
 
 struct OUT_BUF_t
 {
@@ -292,8 +290,6 @@ void static inline setup_OC_DMA_array()
 // setup DMA array values
 void static inline setup_OC_DMA_array_2()
 {
-  // auhOCDMAVal = {0,1,2,3,4,...}
-  for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal_2[i] = i;
 }
 
 // setup all out timers
@@ -311,6 +307,14 @@ void static inline setup_out_timers()
 // setup all out timers
 void static inline setup_out_timers_2()
 {
+  for ( uint8_t axis = AXIS_CNT; axis--; )
+  {
+    // update prescaler, period, compare value
+    __HAL_TIM_SET_AUTORELOAD(TIM_H, 1);
+    __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, 1);
+    // generate an update event to apply timer's data
+    tim_update(axis);
+  }
 }
 
 // setup counter data
@@ -434,19 +438,17 @@ void static inline start_axis_timer_2(uint8_t axis)
 
   // update prescaler, period, compare value
   __HAL_TIM_SET_PRESCALER(TIM_H, auwPresc[axis]);
-  __HAL_TIM_SET_AUTORELOAD(TIM_H, (2*OUT_STEP_MULT*BUF_OUT_CNT - 1));
-  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
   // generate an update event to apply timer's data
   tim_update(axis);
 
   /* Disable the peripheral */
   __HAL_DMA_DISABLE(TIM_DMA_H);
   /* Configure DMA Channel data length */
-  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT*BUF_OUT_CNT);
+  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT*BUF_OUT_CNT - 1);
   /* Configure DMA Channel destination address */
-  TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
+  TIM_DMA->CPAR = (uint32_t)&(TIM->CNT);
   /* Configure DMA Channel source address */
-  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal_2[1];
+  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal_2;
   /* Enable the transfer complete interrupt */
   __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
    /* Enable the Peripheral */
@@ -620,7 +622,6 @@ void process_sys_tick_2()
   // do it every second
   if ( !(HAL_GetTick() % 1000) )
   {
-    // make every second the 16*MULT pulses in 50 us
     add2buf_step_2(0, 50, 16);
   }
 }
