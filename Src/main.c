@@ -96,10 +96,15 @@ volatile uint32_t uwSysTimeDivUS = 0;
 
 uint16_t auhOCDMAVal[2*OUT_STEP_MULT + 1] = {0};
 
+#define MAX_INPUT_FREQ 50 // kHz
+#define DMA_ARRAY_SIZE (MAX_INPUT_FREQ * OUT_STEP_MULT * 2)
+uint16_t auhOCDMAVal_2[DMA_ARRAY_SIZE] = {0};
+
 struct OUT_BUF_t
 {
   uint8_t   uqType;
   uint16_t  uhTime;
+  uint16_t  uhCount;
 };
 volatile struct OUT_BUF_t aBuf[AXIS_CNT][OUT_BUF_SIZE] = {{{0}}};
 volatile uint8_t auqBufOutPos[AXIS_CNT] = {0};
@@ -155,9 +160,13 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 /* Private function prototypes -----------------------------------------------*/
 void static inline start_output(uint8_t axis);
 void static inline stop_output(uint8_t axis);
+void static inline start_output_2(uint8_t axis);
+void static inline stop_output_2(uint8_t axis);
 uint8_t static inline output(uint8_t axis);
 void static inline start_axis_timer(uint8_t axis);
 void static inline stop_axis_timer(uint8_t axis);
+void static inline start_axis_timer_2(uint8_t axis);
+void static inline stop_axis_timer_2(uint8_t axis);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -170,9 +179,11 @@ void static inline stop_axis_timer(uint8_t axis);
 #define TIM           aTim[axis].h->Instance
 #define BUF_IN_TYPE   aBuf[axis][BUF_IN_POS].uqType
 #define BUF_IN_TIME   aBuf[axis][BUF_IN_POS].uhTime
+#define BUF_IN_CNT    aBuf[axis][BUF_IN_POS].uhCount
 #define BUF_IN_POS    auqBufAddPos[axis]
 #define BUF_OUT_TYPE  aBuf[axis][BUF_OUT_POS].uqType
 #define BUF_OUT_TIME  aBuf[axis][BUF_OUT_POS].uhTime
+#define BUF_OUT_CNT   aBuf[axis][BUF_OUT_POS].uhCount
 #define BUF_OUT_POS   auqBufOutPos[axis]
 #define DIR_OUT       saAxisDirOutputs[axis]
 #define DIR_INP       saAxisDirInputs[axis]
@@ -191,6 +202,17 @@ void static inline add2buf_step(uint8_t axis, uint16_t time)
 
   // start output if needed
   if ( !output(axis) ) start_output(axis);
+}
+
+void static inline add2buf_step_2(uint8_t axis, uint16_t time, uint16_t count)
+{
+  BUF_IN_TYPE = 0; // 0 = STEP
+  BUF_IN_TIME = time;
+  BUF_IN_CNT = count;
+  ++BUF_IN_POS;
+
+  // start output if needed
+  if ( !output(axis) ) start_output_2(axis);
 }
 
 void static inline add2buf_dir(uint8_t axis, GPIO_PinState dir)
@@ -267,6 +289,13 @@ void static inline setup_OC_DMA_array()
   auhOCDMAVal[OUT_STEP_MULT*2]      = auhOCDMAVal[OUT_STEP_MULT*2 - 1] - 1;
 }
 
+// setup DMA array values
+void static inline setup_OC_DMA_array_2()
+{
+  // auhOCDMAVal = {0,1,2,3,4,...}
+  for ( uint16_t i = 0; i < DMA_ARRAY_SIZE; ++i ) auhOCDMAVal_2[i] = i;
+}
+
 // setup all out timers
 void static inline setup_out_timers()
 {
@@ -277,6 +306,11 @@ void static inline setup_out_timers()
     // generate an update event to reload the Period
     tim_update(axis);
   }
+}
+
+// setup all out timers
+void static inline setup_out_timers_2()
+{
 }
 
 // setup counter data
@@ -311,6 +345,16 @@ void static inline start_output(uint8_t axis)
   auqOutputOn[axis] = 1;
 }
 
+// start output for selected axis
+void static inline start_output_2(uint8_t axis)
+{
+  // start output generation
+  start_axis_timer_2(axis);
+
+  // output is enabled
+  auqOutputOn[axis] = 1;
+}
+
 // stop output for selected axis
 void static inline stop_output(uint8_t axis)
 {
@@ -324,6 +368,19 @@ void static inline stop_output(uint8_t axis)
   --auqSteps[axis];
   // start output if needed
   if ( need2output(axis) ) start_output(axis);
+}
+
+// stop output for selected axis
+void static inline stop_output_2(uint8_t axis)
+{
+  // start output generation
+  stop_axis_timer_2(axis);
+  // +1 to the current out pos
+  goto_next_out_pos(axis);
+  // output is disabled
+  auqOutputOn[axis] = 0;
+  // start output if needed
+  if ( need2output(axis) ) start_output_2(axis);
 }
 
 // get output enabled flag
@@ -370,7 +427,52 @@ void static inline start_axis_timer(uint8_t axis)
   __HAL_TIM_ENABLE(TIM_H);
 }
 
+#define HCLK_MHZ 72
+void static inline start_axis_timer_2(uint8_t axis)
+{
+  auwPresc[axis] = HCLK_MHZ * BUF_OUT_TIME / (2*OUT_STEP_MULT*BUF_OUT_CNT) - 1;
+
+  // update prescaler, period, compare value
+  __HAL_TIM_SET_PRESCALER(TIM_H, auwPresc[axis]);
+  __HAL_TIM_SET_AUTORELOAD(TIM_H, (2*OUT_STEP_MULT*BUF_OUT_CNT - 1));
+  __HAL_TIM_SET_COMPARE(TIM_H, TIM_CH, auhOCDMAVal[0]);
+  // generate an update event to apply timer's data
+  tim_update(axis);
+
+  /* Disable the peripheral */
+  __HAL_DMA_DISABLE(TIM_DMA_H);
+  /* Configure DMA Channel data length */
+  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT*BUF_OUT_CNT);
+  /* Configure DMA Channel destination address */
+  TIM_DMA->CPAR = (uint32_t)(&(TIM->CCR1) + (TIM_CH >> 2U));
+  /* Configure DMA Channel source address */
+  TIM_DMA->CMAR = (uint32_t)&auhOCDMAVal_2[1];
+  /* Enable the transfer complete interrupt */
+  __HAL_DMA_ENABLE_IT(TIM_DMA_H, DMA_IT_TC);
+   /* Enable the Peripheral */
+  __HAL_DMA_ENABLE(TIM_DMA_H);
+
+  /* Enable the TIM Capture/Compare DMA request */
+  __HAL_TIM_ENABLE_DMA(TIM_H, TIM_DMA_SRC);
+  /* Enable the Output compare channel */
+  TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
+
+  /* Enable the main output */
+  if(IS_TIM_BREAK_INSTANCE(TIM) != RESET)
+  {
+    __HAL_TIM_MOE_ENABLE(TIM_H);
+  }
+  /* Enable the Peripheral */
+  __HAL_TIM_ENABLE(TIM_H);
+}
+
 void static inline stop_axis_timer(uint8_t axis)
+{
+  // disable timer
+  aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
+}
+
+void static inline stop_axis_timer_2(uint8_t axis)
 {
   // disable timer
   aTim[axis].h->Instance->CR1 &= ~(TIM_CR1_CEN);
@@ -386,6 +488,15 @@ void on_axis_DMA_xfer_done(uint8_t axis)
   stop_output(axis);
 }
 
+// on axis DMA transfer complete
+void on_axis_DMA_xfer_done_2(uint8_t axis)
+{
+  /* Clear the transfer complete flag */
+  __HAL_DMA_CLEAR_FLAG(TIM_DMA_H, __HAL_DMA_GET_TC_FLAG_INDEX(TIM_DMA_H));
+
+  // we have finished some output
+  stop_output_2(axis);
+}
 
 
 
@@ -503,6 +614,17 @@ void process_sys_tick()
   }
 }
 
+// on sys tick (every 1000us)
+void process_sys_tick_2()
+{
+  // do it every second
+  if ( !(HAL_GetTick() % 1000) )
+  {
+    // make every second the 16*MULT pulses in 50 us
+    add2buf_step_2(0, 50, 16);
+  }
+}
+
 
 
 
@@ -514,9 +636,11 @@ void process_sys_tick()
 #undef TIM
 #undef BUF_IN_TYPE
 #undef BUF_IN_TIME
+#undef BUF_IN_CNT
 #undef BUF_IN_POS
 #undef BUF_OUT_TYPE
 #undef BUF_OUT_TIME
+#undef BUF_OUT_CNT
 #undef BUF_OUT_POS
 #undef DIR_OUT
 #undef DIR_INP
@@ -561,8 +685,8 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   setup_counter();
-  setup_OC_DMA_array();
-  setup_out_timers();
+  setup_OC_DMA_array_2();
+  setup_out_timers_2();
   /* USER CODE END 2 */
 
   /* Infinite loop */

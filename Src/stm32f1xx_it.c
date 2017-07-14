@@ -39,7 +39,9 @@
 void process_input_step(uint8_t axis);
 void process_input_dirs();
 void process_sys_tick();
+void process_sys_tick_2();
 void on_axis_DMA_xfer_done(uint8_t axis);
+void on_axis_DMA_xfer_done_2(uint8_t axis);
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
@@ -127,7 +129,7 @@ void SysTick_Handler(void)
   HAL_IncTick();
   HAL_SYSTICK_IRQHandler();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-  process_sys_tick();
+  process_sys_tick_2();
   /* USER CODE END SysTick_IRQn 1 */
 }
 
@@ -210,7 +212,7 @@ void DMA1_Channel1_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_tim4_ch1);
   /* USER CODE BEGIN DMA1_Channel1_IRQn 1 */
 #endif
-  on_axis_DMA_xfer_done(3);
+  on_axis_DMA_xfer_done_2(3);
   /* USER CODE END DMA1_Channel1_IRQn 1 */
 }
 
@@ -226,7 +228,7 @@ void DMA1_Channel2_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_tim1_ch1);
   /* USER CODE BEGIN DMA1_Channel2_IRQn 1 */
 #endif
-  on_axis_DMA_xfer_done(0);
+  on_axis_DMA_xfer_done_2(0);
   /* USER CODE END DMA1_Channel2_IRQn 1 */
 }
 
@@ -242,7 +244,7 @@ void DMA1_Channel6_IRQHandler(void)
   HAL_DMA_IRQHandler(&hdma_tim3_ch1_trig);
   /* USER CODE BEGIN DMA1_Channel6_IRQn 1 */
 #endif
-  on_axis_DMA_xfer_done(2);
+  on_axis_DMA_xfer_done_2(2);
   /* USER CODE END DMA1_Channel6_IRQn 1 */
 }
 
@@ -258,7 +260,7 @@ UNUSED(hdma_tim2_ch2_ch4);
   HAL_DMA_IRQHandler(&hdma_tim2_ch2_ch4);
   /* USER CODE BEGIN DMA1_Channel7_IRQn 1 */
 #endif
-  on_axis_DMA_xfer_done(1);
+  on_axis_DMA_xfer_done_2(1);
   /* USER CODE END DMA1_Channel7_IRQn 1 */
 }
 
