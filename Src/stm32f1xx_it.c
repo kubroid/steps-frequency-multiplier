@@ -250,10 +250,7 @@ void setup_out_timers_2()
     TIM_CCxChannelCmd(TIM, TIM_CH, TIM_CCx_ENABLE);
 
     /* Enable the main output */
-    if(IS_TIM_BREAK_INSTANCE(TIM) != RESET)
-    {
-      __HAL_TIM_MOE_ENABLE(TIM_H);
-    }
+    __HAL_TIM_MOE_ENABLE(TIM_H);
   }
 }
 
