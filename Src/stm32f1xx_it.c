@@ -271,10 +271,10 @@ void static inline start_output_2(uint8_t axis)
   tim_update(axis);
 
   /* Configure DMA Channel data length */
-  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT*BUF_OUT_CNT - 1);
+  TIM_DMA_H->Instance->CNDTR = (2*OUT_STEP_MULT*BUF_OUT_CNT);
   /* Enable the Peripheral */
-  __HAL_TIM_ENABLE(TIM_H);
   __HAL_DMA_ENABLE(TIM_DMA_H);
+  __HAL_TIM_ENABLE(TIM_H);
 
   // output is enabled
   auqOutputOn[axis] = 1;
@@ -435,7 +435,10 @@ void static inline process_sys_tick_2()
   // do it every second
   if ( !(HAL_GetTick() % 1000) )
   {
-    add2buf_step_2(0, 50, 16);
+    add2buf_step_2(3, 50000, 8);
+    add2buf_step_2(2, 5000, 8);
+    add2buf_step_2(1, 500, 8);
+    add2buf_step_2(0, 50, 8);
   }
 }
 
@@ -625,7 +628,7 @@ void DMA1_Channel1_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel1_IRQn 0 */
   /* Clear the transfer complete flag */
-  __HAL_DMA_CLEAR_FLAG(&hdma_tim1_ch1, DMA_FLAG_TC2);
+  __HAL_DMA_CLEAR_FLAG(&hdma_tim4_ch1, DMA_FLAG_TC1);
 
   stop_output_2(3);
 
@@ -667,7 +670,7 @@ void DMA1_Channel6_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel6_IRQn 0 */
   /* Clear the transfer complete flag */
-  __HAL_DMA_CLEAR_FLAG(&hdma_tim1_ch1, DMA_FLAG_TC2);
+  __HAL_DMA_CLEAR_FLAG(&hdma_tim3_ch1_trig, DMA_FLAG_TC6);
 
   stop_output_2(2);
 
@@ -688,7 +691,7 @@ void DMA1_Channel7_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel7_IRQn 0 */
   /* Clear the transfer complete flag */
-  __HAL_DMA_CLEAR_FLAG(&hdma_tim1_ch1, DMA_FLAG_TC2);
+  __HAL_DMA_CLEAR_FLAG(&hdma_tim2_ch2_ch4, DMA_FLAG_TC7);
 
   stop_output_2(1);
 
